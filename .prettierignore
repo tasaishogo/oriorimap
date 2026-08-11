@@ -8,6 +8,8 @@ docs/spec/
 .github/workflows/
 scripts/
 skills-lock.json
+# shadcn/ui CLIが生成するコンポーネント実体（vendored。再取得時の差分を汚さないよう整形しない）
+frontend/src/components/ui/
 # 自動生成物
 package-lock.json
 .aws-sam/
