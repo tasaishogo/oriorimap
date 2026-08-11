@@ -7,6 +7,13 @@
 #
 # 通知先メールアドレス等の環境固有値はここに書かない（OSS 公開リポジトリ）。
 # デプロイ時に --parameter-overrides AlertEmail=... で注入する。
+#
+# デプロイ先アカウントの固定（2026-08-11 追加・重要）:
+#   全 config_env に profile を明記する。これが無いと環境の既定プロファイル
+#   （AWS_PROFILE 未設定なら default）へ流れ、意図しないアカウントへ
+#   デプロイされる。実際に T002/T003 の dry-run が別アカウントへ向いた。
+#   profile はローカルの ~/.aws/config のエイリアス（SSO）。CI は OIDC で
+#   AssumeRole するため profile を使わず、ロール ARN 側でアカウントが決まる。
 version = 0.1
 
 [dev.global.parameters]
@@ -17,6 +24,7 @@ cached = true
 parallel = true
 
 [dev.deploy.parameters]
+profile = "smb-infra"
 region = "ap-northeast-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
@@ -32,6 +40,7 @@ cached = true
 parallel = true
 
 [dryrun.deploy.parameters]
+profile = "smb-infra"
 region = "ap-northeast-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
@@ -41,5 +50,6 @@ fail_on_empty_changeset = false
 parameter_overrides = "CreateBudget=true"
 
 [dryrun.delete.parameters]
+profile = "smb-infra"
 region = "ap-northeast-1"
 no_prompts = true

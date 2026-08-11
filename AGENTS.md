@@ -43,6 +43,7 @@
 
 ## サーバーレスバックエンド規約（P2-Node）
 
+- **デプロイ先アカウントはローカル profile `smb-infra` に固定**（design §4.7）。`samconfig.toml` の全 config_env に `profile` を明記済み。`sam` / `aws` を素で叩くと環境の既定プロファイル（別アカウント）へ流れるため、**アカウントを跨ぐ確認コマンドでは必ず `--profile smb-infra` を付ける**
 - IaC: SAM（template.yaml）。リソース変更は必ずtemplate経由。コンソール手作業やad-hocなAWS CLI変更は禁止
 - デプロイフロー: iac-workflow スキルに従う（cfn-lint検証 → changeset確認 → デプロイ）。dev環境の更新はmainマージ後のCD（deploy-dev.yml）経由のみ
 - Lambda (Node.js 24.x / TypeScript):

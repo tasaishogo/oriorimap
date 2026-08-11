@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >-
-  OriOriMap — データ・API基盤（T002）+ 認証基盤（T003）。DynamoDB シングルテーブル /
+  OriOriMap — データ・API基盤（T002）+ 認証基盤（T003）+ 配信基盤（T004）。DynamoDB シングルテーブル /
   S3×2 / HTTP API + Cognito JWT Authorizer / Lambda（api・cleanup）/
-  EventBridge Scheduler / 監視（Alarm・Budgets）/ Cognito User Pool（Lite）。
-  Google IdP は T013、CloudFront は T004 で追加する。
+  EventBridge Scheduler / 監視（Alarm・Budgets）/ Cognito User Pool（Lite）
+  + 配信基盤（T004）。CloudFront（SPA・メディア・API/embed の単一オリジン集約）。
+  Google IdP は T013、独自ドメイン・ACM は T031 で追加する。
   正本: docs/spec/02_design.md §2・§3・§4.3・§4.5・§6
 
 # ---------------------------------------------------------------------------
@@ -397,6 +398,146 @@ Resources:
       RetentionInDays: 14
 
   # -------------------------------------------------------------------------
+  # 配信: CloudFront（design §2）
+  #   default   → S3 SPA（OAC）
+  #   /media/*  → S3 メディア（OAC）※オブジェクトキーは media/ プレフィックス配下
+  #   /api/*    → HTTP API（キャッシュ無効）
+  #   /embed/*  → HTTP API（キャッシュ無効）
+  #   単一オリジンに集約するため CORS 設定が不要になる。
+  # -------------------------------------------------------------------------
+  CloudFrontOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-s3-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # SPA のクライアントサイドルーティング（§5.1 の9ルート）を成立させる。
+  # CloudFront の CustomErrorResponses はディストリビューション全体に効くため
+  # 使えない――API が返す 404（design §4.2「非公開・不存在は404」）まで
+  # index.html + 200 に書き換えてしまい API 契約を壊す。
+  # 既定ビヘイビアにだけ関数を付けることで /api/* ・ /embed/* は影響を受けない。
+  SpaRoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub '${AWS::StackName}-spa-routing'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: 拡張子を持たないパスを /index.html へ書き換える（SPAルーティング）
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          var lastSlash = uri.lastIndexOf('/');
+          var lastSegment = uri.substring(lastSlash + 1);
+          // 末尾がディレクトリ、または拡張子を持たない = SPA のルート
+          if (lastSegment.length === 0 || lastSegment.indexOf('.') === -1) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'OriOriMap (${AWS::StackName})'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        # PriceClass_100 は日本のエッジを含まないため 200 を選ぶ（転送は無料枠1TB/月）
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: spa
+            DomainName: !GetAtt SpaBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOac.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: media
+            DomainName: !GetAtt MediaBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOac.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: api
+            DomainName: !Sub '${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: spa
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRoutingFunction.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /media/*
+            TargetOriginId: media
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            # Host ヘッダーを転送しない（API Gateway が不一致 Host を拒否するため）。
+            # Authorization を含む他のビューワーヘッダーはすべて転送される。
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+          - PathPattern: /embed/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+
+  # OAC 経由の CloudFront だけに読み取りを許す（バケットは全公開ブロック済み）
+  SpaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SpaBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${SpaBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  MediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${MediaBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  # -------------------------------------------------------------------------
   # 監視: CloudWatch Alarm（Lambda errors・APIGW 5xx）+ AWS Budgets（design §3・§7）
   # -------------------------------------------------------------------------
   AlertTopic:
@@ -493,13 +634,23 @@ Resources:
 
 Outputs:
   ApiEndpoint:
-    Description: HTTP API のベース URL（T004 で CloudFront 経由に切り替わる）
+    Description: >-
+      HTTP API の直アクセス URL。通常の利用経路は CloudFront（AppUrl）で、
+      こちらはオリジン直叩きの疎通確認用に残す。
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
   AppUrl:
     Description: >-
-      アプリの入口 URL。T004 までは HTTP API のエンドポイントを指す
-      （.github/workflows/deploy-dev.yml のスモークテスト契約）。
-    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+      アプリの入口 URL（CloudFront）。deploy-dev.yml のスモークテスト契約。
+      T031 で独自ドメイン oriorimap.kiryu.tech に切り替わる。
+    Value: !Sub 'https://${Distribution.DomainName}'
+  DistributionId:
+    Description: >-
+      CloudFront ディストリビューション ID
+      （deploy-dev.yml のキャッシュ invalidation 契約）。
+    Value: !Ref Distribution
+  DistributionDomainName:
+    Description: CloudFront の既定ドメイン（dev 環境はこれを使う。Geolonia キーへ登録=T039）
+    Value: !GetAtt Distribution.DomainName
   MainTableName:
     Description: DynamoDB シングルテーブル名
     Value: !Ref MainTable
