@@ -25,6 +25,7 @@ coverage/
 # --- テスト成果物 ---
 playwright-report/
 test-results/
+ctrf/
 
 # --- Claude Code / エージェント運用のローカル状態 ---
 .claude/settings.local.json
