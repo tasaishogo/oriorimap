@@ -2,6 +2,39 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AppRoutes from './routes';
 
+vi.mock('@geolonia/embed/core', () => ({
+  GeoloniaMap: vi.fn(function () {
+    return {
+      on: vi.fn(),
+      once: vi.fn(),
+      off: vi.fn(),
+      addControl: vi.fn(),
+      removeControl: vi.fn(),
+      addSource: vi.fn(),
+      addLayer: vi.fn(),
+      getSource: vi.fn(),
+      hasImage: vi.fn(() => false),
+      loadImage: vi.fn(() => Promise.resolve({ data: {} })),
+      addImage: vi.fn(),
+      fitBounds: vi.fn(),
+      easeTo: vi.fn(),
+      isStyleLoaded: vi.fn(() => true),
+      remove: vi.fn(),
+    };
+  }),
+  keyring: { setApiKey: vi.fn() },
+}));
+vi.mock('maplibre-gl', () => ({
+  default: {
+    GeolocateControl: vi.fn(function () {
+      return { on: vi.fn(), off: vi.fn(), trigger: vi.fn() };
+    }),
+  },
+  GeolocateControl: vi.fn(function () {
+    return { on: vi.fn(), off: vi.fn(), trigger: vi.fn() };
+  }),
+}));
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>

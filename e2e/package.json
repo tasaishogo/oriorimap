@@ -2,5 +2,9 @@
   "name": "@oriorimap/e2e",
   "private": true,
   "version": "0.0.0",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "playwright-ctrf-json-reporter": "^0.0.29"
+  }
 }
