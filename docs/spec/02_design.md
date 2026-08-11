@@ -199,11 +199,13 @@ graph LR
   - `pipeline-gates.yml`（PR時。bootstrap 設置済みで **ci.yml の役割を兼ねる**）: lint（ESLint/Prettier）→ 型チェック（tsc）→ 単体テスト（Vitest）→ 結合 → mutation。T005 で **`build` ジョブ（`sam validate` + `sam build` + フロントビルド）を追加**する。**AWS へのアクセスは一切行わない**（`sam validate` は cfn-lint によるローカル検証のみで認証情報不要）
   - ~~`ci.yml`~~ → **新規作成しない**。上記に集約する（重複した CI 実行とシグナルを避ける）
   - ~~`deploy.yml`~~ → **廃止（2026-08-12）**。下記「デプロイ経路」に置き換え
-- **デプロイ経路（2026-08-12 改訂・OIDC ロールを作らない設計）**:
-  - **dev**: MicroVM 内のエージェント（ロール `mvm-proj-oriorimap`）が ChangeSet を作成し、**mvm-gate Lambda（cfn-guard 同梱）が合格分を自動 ExecuteChangeSet** する。エージェントは `ExecuteChangeSet` を恒久に持たない。guard 違反時のみ ntfy でスマホ通知 → 人間が `proj approve`。SPA の配信（`aws s3 sync` + CloudFront invalidation）は ChangeSet ではないため同エージェントがデータプレーン権限で実行する
-  - **prod**: T031 以降、**人間が明示的にデプロイ**する（自動デプロイ経路を持たない）
+- **デプロイ経路（2026-08-12 改訂。フェーズで変わる――恒久的に CD を持たないのではなく、実装期に持たない）**:
+  - **【実装期】dev**: MicroVM 内のエージェント（ロール `mvm-proj-oriorimap`）が ChangeSet を作成し、**mvm-gate Lambda（cfn-guard 同梱）が合格分を自動 ExecuteChangeSet** する。エージェントは `ExecuteChangeSet` を恒久に持たない。guard 違反時のみ ntfy でスマホ通知 → 人間が `proj approve`。SPA の配信（`aws s3 sync` + CloudFront invalidation）は ChangeSet ではないため同エージェントがデータプレーン権限で実行する。**この期間 CD は不要**――dev の書き手が単一（直列ワーカー1本）だから
+  - **【運用期】dev**: 初期構築が完了して波が常時回らなくなると、**VM を起動しないと dev が更新されない**という不便が表面化する。この時点で **CD（GitHub Actions + OIDC ロール1本）を導入**し、dev の書き手を「main へのマージ」に戻す。gate 経路は休眠させる（削除はしない）
+  - **prod**: T031 以降、**人間が明示的にデプロイ**する（実装期・運用期を通じて自動デプロイ経路を持たない）。**prod スタックには `mvm-proj-oriorimap-cfn` をサービスロールとして設定しない**――gate を通さない以上不要であり、付けると下記「運用期への移行」の制約を prod まで背負い込むため
   - **採用理由**: gate Lambda は Function URL が `AuthType=AWS_IAM` で、かつ呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため、**GitHub Actions からは呼べない**（CD 専用ロールを作っても 403）。また `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外で、CD を残すなら結局 OIDC ロールに CFn 書き込み権限とデータプレーン権限の両方が要る。**IaC の実行経路を gate 1本に一元化する**ため CD ごと廃止した
-  - **トレードオフ**: dev は「main の姿」ではなく「エージェントの検証環境」になる。PR が却下された変更も dev に残るため、**次の波の先頭で main から再デプロイして揃える**。並列実行では成立しない設計（複数エージェントが dev を奪い合う）で、**MicroVM の直列・単一ワーカー運用が前提**
+  - **トレードオフ（実装期のみ）**: dev は「main の姿」ではなく「エージェントの検証環境」になる。PR が却下された変更も dev に残るため、**次の波の先頭で main から再デプロイして揃える**。並列実行では成立しない設計（複数エージェントが dev を奪い合う）で、**MicroVM の直列・単一ワーカー運用が前提**。運用期に CD を入れると dev は「main の姿」に戻る
+  - **運用期への移行時の注意（`proj retire` の F19 ガード）**: `tools/proj` は `mvm-proj-<name>-cfn` をサービスロールとして参照するスタックが存在する間、vend の retire を**拒否**する（「アプリスタックがサービスロールを参照中です。先に削除してください」。CFn のスティッキー参照でロールを先に消すとアプリスタックが削除不能になる実事故に由来）。dev はこのロールで作るため、素直に retire しようとすると dev を捨てることになる。**方針: retire しない**――vend スタックの中身（IAM ロール・Permissions Boundary・Budget）は呼ばれなければ実質 $0 で、残しても害がなく、運用期のたまの IaC 変更に gate を再利用できる。どうしても retire する場合は、先に dev のサービスロールを CD ロールへ付け替える（`update-stack --role-arn`。CD ロールに `iam:PassRole` が要る）か、dev を作り直す（保持しているのはテストデータのみ）
 - **デプロイ先AWSアカウント（2026-08-11 明記）**: 個人の共通インフラ用アカウント（ローカル profile: **`smb-infra`**・IAM Identity Center/SSO）。同アカウントには同パターンの先行プロジェクト（simple-cms）が稼働している。**`samconfig.toml` の全 config_env に `profile = "smb-infra"` を明記する**――未指定だと環境の既定プロファイルへ流れ、意図しないアカウントへデプロイされる（T002/T003 の dry-run で実際に発生させた）。CI は OIDC の AssumeRole でアカウントが決まるため profile を使わない。Google OAuth の SSM パラメータ（§4.3）も同アカウントの ap-northeast-1 に置く。
 - 環境: dev / prod の2スタック（`samconfig.toml`で分離）。フロントの環境別設定（APIオリジン・GeoloniaAPIキー等）はビルド時環境変数で注入（GeoloniaキーはURL制限付きの公開前提キーだが、リポジトリには直接コミットしない）
 - E2E（Playwright）はCIの必須ゲートにはせず、dev環境に対して手動またはリリース前に実行（実行時間とGeolonia表示回数の消費を抑えるため）
