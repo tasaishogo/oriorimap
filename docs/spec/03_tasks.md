@@ -45,8 +45,9 @@
 
 - [ ] T003 [serial] SAM IaC: Cognito User Pool + JWT Authorizer 追加とdry-run（Wave 0）
   - 対象: template.yaml
-  - 内容: Cognito User Pool（Liteティア明示・メール+パスワード・メール検証必須・Hosted UI日本語・Cognito既定メール送信）と HTTP API の JWT Authorizer 接続を追加（design §4.3。Google IdPはT013で追加）。Authorizer検証用に、既存healthハンドラを流用したAuthorizer付きルート `GET /api/health-auth` をテンプレートに追加（アプリコードの変更なし）
-  - Done条件: 使い捨てスタックで Hosted UI のサインアップ画面が表示され、テストユーザー作成→取得したJWT付き `curl /api/health-auth` が200・JWTなしで401
+  - 内容: Cognito User Pool（Liteティア明示・メール+パスワード・メール検証必須・**確認メール本文は日本語**・Cognito既定メール送信）と HTTP API の JWT Authorizer 接続を追加（design §4.3。Google IdPはT013で追加）。Authorizer検証用に、既存healthハンドラを流用したAuthorizer付きルート `GET /api/health-auth` をテンプレートに追加（アプリコードの変更なし）
+  - **2026-08-11 改訂（ログインUI方式の変更に伴う）**: 当初の「Hosted UI日本語」は AWS 仕様上成立しない（日本語化は managed login 限定＝Essentials 以上。Liteは英語のclassic hosted UIのみ）。**ログインUIは自前実装に変更**したため本タスクのスコープから Hosted UI の日本語化が外れ、代わりに **App client の `ExplicitAuthFlows`（`ALLOW_USER_SRP_AUTH`＋`ALLOW_REFRESH_TOKEN_AUTH`＋`ALLOW_ADMIN_USER_PASSWORD_AUTH`。`ALLOW_USER_PASSWORD_AUTH`は有効化しない）**と、Googleフェデレーション用の Cognito ドメイン（`ManagedLoginVersion: 1`）が対象に入る。詳細は design §4.3
+  - Done条件（改訂）: 使い捨てスタックで User Pool・App client・ドメインが作成され、CLI でテストユーザーを作成（`admin-create-user` + `admin-set-user-password`）→ `admin-initiate-auth` で取得したJWT付き `curl /api/health-auth` が200・**JWTなしで401**・**不正な署名のJWTで401**
   - 依存: T002
   - _Requirements: R1.1, R1.3, R1.6_
 
@@ -114,16 +115,17 @@
 
 ## Phase C: 機能スライス
 
-- [ ] T012 認証スライス①: Hosted UIログイン・保護ルート・プロフィール
-  - 対象: frontend/src/features/auth/, backend/src/routes/me.ts, e2e前提のテストユーザー手順
-  - 内容: Authorization Code + PKCE で Hosted UI と連携（登録→確認メール→ログイン→ログアウト）。フロントの保護ルート（未ログインはログイン誘導=R1.6）、`GET /api/me`（JWT必須）実装
+- [ ] T012 認証スライス①: 自前ログインUI・保護ルート・プロフィール
+  - 対象: frontend/src/features/auth/, frontend/src/pages/(Login, Signup, Confirm), backend/src/routes/me.ts, e2e前提のテストユーザー手順
+  - 内容: **`aws-amplify/auth`（headless）+ shadcn/ui で自前のログイン・登録・確認コード画面を実装**（登録→確認メール→確認コード入力→ログイン→ログアウト）。SRP認証・完全日本語・§5.2藤重トークン準拠・IME規約準拠。`@aws-amplify/ui-react` の Authenticator は使わない（design §4.3）。フロントの保護ルート（未ログインは `/login` へ誘導=R1.6）、`GET /api/me`（JWT必須）実装
+  - **2026-08-11 改訂**: Hosted UI 連携から自前UI実装へ変更（design §3「認証」行・§4.3）。実装量が増える分、T013 のパスワード再設定UIも同じ基盤に乗る
   - Done条件: dev環境で メール登録→確認→ログイン→マイページ表示→ログアウト を手動確認。`curl`（JWTなし）で `/api/me` が401、JWT付きで200
   - 依存: T005, T006, T007
   - _Requirements: R1.1, R1.3, R1.5, R1.6_
 
 - [ ] T013 認証スライス②: Google IdP・パスワード再設定・ロックアウト確認
   - 対象: template.yaml（Google IdP追加）, frontend/src/features/auth/
-  - 内容: Google IdPをUser Poolへ追加しHosted UIにGoogleボタンを表示。パスワード再設定フロー（R1.4）、パスワード無しアカウントへの案内表示（R1.9）、Cognito標準ロックアウトの挙動確認（R1.7）
+  - 内容: Google IdPをUser Poolへ追加し、**自前ログイン画面に「Googleでログイン」ボタンを実装**（`signInWithRedirect({provider:'Google'})`。`identity_provider` 指定によりCognitoは画面を描画せず即Googleへ転送するため英語画面は出ない）。パスワード再設定フロー（R1.4・自前画面）、パスワード無しアカウントへの案内表示（R1.9）、**Cognito標準ロックアウトの挙動確認と日本語エラー表示の実装**（R1.7。Hosted UIを使わないため表示は自前。design §7）
   - Done条件: dev環境で Googleログイン成功・再設定メール受信と再設定成功・誤パスワード連続入力で一時ロックを確認（各手順を記録）
   - 依存: T012, T010
   - _Requirements: R1.2, R1.4, R1.7, R1.9_

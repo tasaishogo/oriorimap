@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-小規模・低コスト（月額$0〜10目標）・個人運用を最優先し、AWSサーバーレスの無料枠内に収まるフルスタック構成とする。project-patterns.md の P3（フルスタック）= P1（React SPA）+ P2-Node（Hono/Lambda）の既定スタックに準拠し、IaCはSAM（AWS単体完結のため）。embed のドメイン制限は「Lambda が CSP frame-ancestors ヘッダー付きの embed用HTML を直接返す」方式で追加コストゼロで実現する。認証は Cognito User Pool（Liteティア）に委譲し、パスワードを自前で扱わない。
+小規模・低コスト（月額$0〜10目標）・個人運用を最優先し、AWSサーバーレスの無料枠内に収まるフルスタック構成とする。project-patterns.md の P3（フルスタック）= P1（React SPA）+ P2-Node（Hono/Lambda）の既定スタックに準拠し、IaCはSAM（AWS単体完結のため）。embed のドメイン制限は「Lambda が CSP frame-ancestors ヘッダー付きの embed用HTML を直接返す」方式で追加コストゼロで実現する。認証は Cognito User Pool（Liteティア）に委譲し、**パスワードの保存・検証を自前で行わない**（ログインフォームは日本語化とデザイン統一のため自前実装するが、SRP によりパスワード自体はネットワークにも自前バックエンドにも渡らない。§3「認証」行・§4.3）。
 
 ## 2. Architecture
 
@@ -47,7 +47,7 @@ graph LR
   L -->|"presigned PUT発行/検証"| S3M
   B -->|"タイル・スタイル"| GEO
   B -->|"住所検索(fetch)"| GSIA
-  B -->|"Hosted UI (Code+PKCE)"| COG
+  B -->|"自前ログインUI<br/>(aws-amplify/auth・SRP)"| COG
   COG --> GGL
   SCH --> LC
   LC --> DDB
@@ -72,7 +72,7 @@ graph LR
 | API                        | API Gateway **HTTP API** + JWT Authorizer + Lambda **nodejs24.x** + Hono（`hono/aws-lambda`）+ Powertools for AWS Lambda (TS) + SAM esbuild(ESM)                                                   | 準拠（P2-Node既定）                               | JWT検証はAPI Gatewayネイティブ機能でLambda Authorizer不要（\_research.md §9-3）。**ランタイムは 2026-08-11 に nodejs22.x から nodejs24.x へ更新**（T002実装時・ユーザー判断）: 22 はサポート期限が2027年4月頃で更新頻度が高い。24 はGA・LTSで**2028年4月**まで、全リージョン提供・Powertools (TS) 対応済み。最新の `nodejs26.x` は **preview** で AWS が本番ワークロード非推奨とし実行ログに警告を出すため不採用（GA後に移行。§10）                                                                                                                                                                                                          |
 | DB                         | DynamoDB（シングルテーブル + GSI×2、オンデマンド）                                                                                                                                             | 準拠（P2既定）                                    | 読み取り中心・少量書き込みでアイドル時ゼロ課金。**本サービスのアクセスパターンに空間クエリが存在しない**ことが採用の核（§3.2の比較検討参照）。§6参照                                                                                                                                     |
 | 検索・ソート（R3.1, R3.2） | GSI1（公開一覧）を全件Queryし**Lambda内で部分一致フィルタとソート**（`sort=created\|updated` いずれもLambda内。GSIの物理順はupdatedAtのみ）                                                    | 準拠の範囲内                                      | 公開地図は数百件規模の想定でメタデータ全件が1〜数MB・1回のQueryに収まるため、フィルタ・ソートともLambda内で完結させる（created用GSIは追加しない）。この前提は公開コンテンツ合計1,000件までとし、超過時の移行方針を§10に記載。OpenSearch等の検索基盤はコスト（月$25〜）が規模に対して過剰 |
-| 認証                       | Cognito User Pool（**Liteティア明示指定**）+ メール/パスワード + Google IdP + Hosted UI（Authorization Code + PKCE）                                                                           | 準拠（AWSマネージド優先）                         | 無料枠10,000 MAU・パスワード非保持・R1.7のロックアウトも標準機能。パスワードレス等の上位機能は不要でLiteが最大73%安い（\_research.md §9-1）                                                                                                                                              |
+| 認証                       | Cognito User Pool（**Liteティア明示指定**）+ メール/パスワード + Google IdP + **自前ログインUI（`aws-amplify/auth` headless + shadcn/ui。SRP認証）**                                                                           | 準拠（AWSマネージド優先）                         | 無料枠10,000 MAU・パスワード非保持・R1.7のロックアウトも標準機能。パスワードレス等の上位機能は不要でLiteが最大73%安い（\_research.md §9-1）。**2026-08-11 改訂: ログインUIを Hosted UI から自前実装へ変更**（T003実装時に判明した仕様矛盾の解消）。理由: Cognito のログインページ日本語化（`?lang=ja`）は **managed login 限定機能で Essentials 以上が必要**であり、当初の「Liteティア + Hosted UI 日本語化」は AWS 仕様上成立しない。Lite で使えるのは英語の classic hosted UI のみ。AWS の機能プラン表で **Google等のソーシャルIdP・SRP認証・ユーザーグループはいずれも Lite に含まれる**ことを確認済みで、Lite の制約は「Cognitoがホストするログインページ」に限定される。したがって自前UIにすれば制約は解消し、Liteティア（design の低コスト方針）と完全日本語・§5.2 藤重トークンとの一致を両立できる。Essentials への昇格（10,000 MAU まで無料枠は同一で現時点$0）と比較した結果、超過後の単価（Lite $0.0055 / Essentials $0.015）はどちらも予算$10を大幅超過する水準でしか効かず判断材料にならないため、デザイン一貫性とバンドルサイズ（§4性能 LCP≤3秒）で自前UIを採る |
 | 認証メール                 | 開発: Cognito既定（50通/日上限）→ 本番: SES連携（`DEVELOPER`構成）                                                                                                                             | 準拠                                              | Cognito既定の50通/日は本番で不足しうる。SES本番アクセス申請はリリース前タスク（§10）                                                                                                                                                                                                     |
 | ジオコーディング           | 国土地理院 AddressSearch API（一次）+ Geolonia Community Geocoder（フォールバック）                                                                                                            | カタログ外                                        | 両方無償・商用可・フロントから直接呼べる。GSIはCORS許可済み・街区/号レベル解決が多く精度優位（\_research.md §7）。出典表示をフッターに記載                                                                                                                                               |
 | メディア配信               | S3 + CloudFront（`/media/*`）                                                                                                                                                                  | 準拠                                              | —                                                                                                                                                                                                                                                                                        |
@@ -118,7 +118,7 @@ graph LR
 
 ### 4.1 フロントエンド SPA（frontend/）
 
-- 責務: 全画面のUI。地図描画（Geolonia）、ジオコーディング呼び出し、KML/CSVのクライアント側パース、画像のCanvas変換、Cognito Hosted UIとのOAuthフロー（Code + PKCE）
+- 責務: 全画面のUI。地図描画（Geolonia）、ジオコーディング呼び出し、KML/CSVのクライアント側パース、画像のCanvas変換、**認証フロー（自前ログインUI + `aws-amplify/auth`。メール/パスワードは SRP でブラウザから Cognito API へ直接、Googleは `signInWithRedirect` でフェデレーション）**
 - 公開I/F: ルーティング `/`（トップ・検索） `/maps/:id`（閲覧・重ね合わせ） `/maps/:id/edit` `/overlays/:id` `/mypage` `/settings` `/admin` ほか
 - 入出力: `shared/` のZodスキーマから生成した型でAPIと通信。アクセストークン(JWT)は `Authorization: Bearer` ヘッダーで送付（Cookieは使わない）
 
@@ -159,7 +159,13 @@ graph LR
 ### 4.3 認証（Cognito User Pool）
 
 - 責務: 登録・確認メール・ログイン・パスワード再設定・Googleフェデレーション・トークン発行（R1.1-R1.9, R1.11）
-- 設定: Liteティア / Hosted UI（日本語化）/ Google IdP / 属性: email, name / メール検証必須
+- 設定: Liteティア / **自前ログインUI（Cognitoのログインページは使わない）** / Google IdP / 属性: email, name / メール検証必須
+- **ログインUIの方式（2026-08-11 決定。§3「認証」行に経緯）**:
+  - **メール/パスワード系**（登録・確認コード・ログイン・パスワード再設定）は `aws-amplify/auth`（headless）+ shadcn/ui の自前フォームで実装する。既定の **SRP（`USER_SRP_AUTH`）によりパスワード自体はネットワークに送出されず**、通信はブラウザ →`cognito-idp.<region>.amazonaws.com` 直で**自前Lambdaを一切経由しない**（R1.3 の「マネージド認証基盤で管理」は維持）。UIライブラリ（`@aws-amplify/ui-react` の Authenticator）は採用しない——独自デザインシステムが §5.2 藤重トークン・shadcn/ui と二重化し、バンドル増が §4性能 の LCP≤3秒に効くため
+  - **Google IdP** はフェデレーションの性質上 Cognito ドメインを経由する（`signInWithRedirect({provider:'Google'})` → `/oauth2/authorize?identity_provider=Google`）。`identity_provider` を明示するため **Cognito は自前ページを描画せず即座に Google へ転送**し、同意画面は Google 側が日本語化する。したがって正常系で英語の Cognito 画面は表示されない。**異常系（PreSignUpトリガーの例外＝R1.8/R1.11 の自動リンク経路）で Cognito が英語エラーページを描画せず redirect_uri へ error パラメータを返すことは T014 のスパイクで実機確認する**
+  - App client の `ExplicitAuthFlows`: `ALLOW_USER_SRP_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH`（ブラウザ用）+ `ALLOW_ADMIN_USER_PASSWORD_AUTH`（AWS認証情報が必須の管理フロー。T003の疎通検証とT036のE2Eで使用）。**`ALLOW_USER_PASSWORD_AUTH`（平文パスワードをAPIへ送る非SRPフロー）は有効化しない**
+  - Cognitoドメイン自体は Google フェデレーションに必要なため作成する（`ManagedLoginVersion: 1` = classic。Liteでは唯一の選択肢）
+  - トレードオフ: パスワード入力フォームを自社ホストするため XSS 対策の責任が増し、R1.7 のロックアウトエラー表示も自前で実装する（§7）
 - 同一メール自動リンク（R1.8, R1.11）の実装方式:
   - Pre SignUp Lambdaトリガーの **`PreSignUp_ExternalProvider`** イベントで、`ListUsers`（emailフィルタ・完全一致）により既存ネイティブユーザーを照合する
   - 既存ユーザーが `email_verified=true` の場合: **`AdminLinkProviderForUser`** でGoogleプロバイダを既存ユーザーにリンクした上で例外を投げ、外部プロバイダ由来の重複ユーザー作成を中止する（Cognitoの標準パターン。フロントはこの初回エラーを検知して自動で再ログインし、リンク済みユーザーとして成立させる）
@@ -214,7 +220,7 @@ graph LR
 | 地図作成・編集      | `/maps/:id/edit`                 | スポット追加（クリック/住所検索）・アイコン設定・写真・公開切替・インポート・削除            | R2, R7         |
 | embed設定           | `/maps/:id/embed`（overlay同様） | 許可ドメイン管理・iframeコード発行                                                           | R6             |
 | embedビュー         | `/embed/:type/:id`               | 閲覧専用地図（ヘッダーなし・帰属表記あり・「OriOriMapで開く」リンク）                        | R6.4           |
-| ログイン/登録       | Cognito Hosted UI                | メール+パスワード登録・Google・再設定                                                        | R1             |
+| ログイン/登録       | `/login`・`/signup`・`/confirm`・`/reset-password`（自前画面） | メール+パスワード登録・確認コード入力・Google・再設定。すべて日本語・§5.2トークン準拠         | R1             |
 | マイページ          | `/mypage`                        | 自分の地図・重ね合わせ地図一覧                                                               | R2, R5         |
 | アカウント設定      | `/settings`                      | 表示名変更・退会                                                                             | R1.10          |
 | 管理者画面          | `/admin`                         | 通報一覧・非公開化/削除                                                                      | R8             |
@@ -299,8 +305,8 @@ DynamoDB シングルテーブル `oriorimap-main`（オンデマンド、PITR�
 
 | 障害モード                                                | 対応                                                                                                                                                    | 対応する要件 |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 未ログインで作成・編集API呼び出し                         | 401 → フロントでログイン画面（Hosted UI）へ誘導                                                                                                         | R1.6         |
-| ログイン連続失敗                                          | Cognito標準ロックアウト（自動）。Hosted UIがエラー表示                                                                                                  | R1.7         |
+| 未ログインで作成・編集API呼び出し                         | 401 → フロントで自前ログイン画面（`/login`）へ誘導                                                                                                      | R1.6         |
+| ログイン連続失敗                                          | Cognito標準ロックアウト（自動）。**自前ログイン画面が `NotAuthorizedException` / `TooManyRequestsException` を日本語メッセージで表示**（Hosted UI を使わないため表示は自前実装。§4.3） | R1.7         |
 | Googleログインのメールが既存アカウントと一致              | Pre SignUpトリガーで検証済みなら自動リンク / 未検証なら例外→「メール検証を完了してください」表示                                                        | R1.8, R1.11  |
 | パスワード無しアカウントの再設定要求                      | Cognitoが対象外エラー → フロントで「Googleでログインしてください」案内                                                                                  | R1.9         |
 | スポットのタイトル空で保存                                | Zod検証で400・インラインエラー（クライアントでも事前検証）                                                                                              | R2.6         |
@@ -360,7 +366,7 @@ oriorimap/
 │   │   ├── pages/             #   Top, MapView, MapEdit, OverlayView, EmbedView, MyPage, Settings, Admin, EmbedSettings
 │   │   ├── components/map/    #   GeoloniaMap, SymbolLayers, EditMarkers, LegendCard, GeolocateButton
 │   │   ├── components/ui/     #   shadcn/ui生成物 + font-display等の拡張
-│   │   ├── features/          #   search, import(kml/kmz/csvパース), upload(canvas変換+complete検証呼出), auth(PKCE), report
+│   │   ├── features/          #   search, import(kml/kmz/csvパース), upload(canvas変換+complete検証呼出), auth(aws-amplify/auth・自前ログインUI), report
 │   │   ├── styles/tokens.css  #   §5.2デザイントークン（Tailwind @theme）
 │   │   └── lib/api.ts         #   型付きAPIクライアント
 │   └── tests/

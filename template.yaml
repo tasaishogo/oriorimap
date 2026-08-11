@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >-
-  OriOriMap — データ・API基盤（T002）。DynamoDB シングルテーブル / S3×2 /
-  HTTP API / Lambda（api・cleanup）/ EventBridge Scheduler / 監視（Alarm・Budgets）。
-  Cognito+JWT Authorizer は T003、CloudFront は T004 で追加する。
-  正本: docs/spec/02_design.md §2・§3・§4.5・§6
+  OriOriMap — データ・API基盤（T002）+ 認証基盤（T003）。DynamoDB シングルテーブル /
+  S3×2 / HTTP API + Cognito JWT Authorizer / Lambda（api・cleanup）/
+  EventBridge Scheduler / 監視（Alarm・Budgets）/ Cognito User Pool（Lite）。
+  Google IdP は T013、CloudFront は T004 で追加する。
+  正本: docs/spec/02_design.md §2・§3・§4.3・§4.5・§6
 
 # ---------------------------------------------------------------------------
 # ビルドの前提
@@ -41,6 +42,16 @@ Parameters:
     Description: >-
       AWS Budgets はアカウント全体を対象とするため、複数環境スタックで
       重複作成しない。dev スタックのみ true、prod スタックは false にする。
+  AppCallbackUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/
+    Description: >-
+      Google フェデレーション後のリダイレクト先（Cognito App client の CallbackURLs）。
+      CloudFront ドメイン確定後（T004/T005）に dev/prod の URL を追加する。
+  AppLogoutUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/
+    Description: サインアウト後のリダイレクト先（Cognito App client の LogoutURLs）。
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
@@ -163,7 +174,120 @@ Resources:
             ExpiredObjectDeleteMarker: true
 
   # -------------------------------------------------------------------------
-  # API: HTTP API（design §2）。JWT Authorizer は T003 で追加する
+  # 認証: Cognito User Pool（design §4.3）
+  #   ログインUIは自前実装（aws-amplify/auth headless + shadcn/ui・SRP）。
+  #   Cognito の Hosted UI / managed login は使わない――ログインページの
+  #   日本語化は managed login 限定機能で Essentials 以上が必要なため
+  #   （Lite で使えるのは英語の classic hosted UI のみ）。
+  #   Google IdP・SRP認証・ユーザーグループはいずれも Lite に含まれる。
+  # -------------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    # ユーザーアカウント（個人情報）を保持するため MainTable と同じ扱いにする
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-users'
+      # Lite: 無料枠 10,000 MAU。passkey/パスワードレス等の上位機能は使わない
+      UserPoolTier: LITE
+      # メールアドレスをユーザー名として使う（大文字小文字を区別しない）
+      UsernameAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      AutoVerifiedAttributes: [email]
+      MfaConfiguration: 'OFF'
+      # 使い捨て検証スタックを削除できるようにする。prod は §10 の課題として有効化を検討
+      DeletionProtection: INACTIVE
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        # R1.1 の「表示名」。DynamoDB 側の displayName（design §6）と併せて保持する
+        - Name: name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      # 主要利用者層（地域住民・中高年含む）を踏まえ、記号・大文字の必須化は避け
+      # 長さと英小文字＋数字で担保する。R1.3 はハッシュ保存＝Cognito 委譲で満たす
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: false
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - { Name: verified_email, Priority: 1 }
+      # T032 で SES 連携（EmailSendingAccount: DEVELOPER）へ切り替える
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      # 確認は「コード」方式。リンク方式（CONFIRM_WITH_LINK）は Cognito ドメインの
+      # 確認ページ（Lite では英語の classic hosted UI）へ飛ぶため日本語化できない
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: '【OriOriMap】メールアドレスの確認'
+        EmailMessage: "OriOriMap へのご登録ありがとうございます。\n確認コード: {####}\n\nこのコードを登録画面に入力してください。\nお心当たりのない場合はこのメールを破棄してください。"
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: [email]
+
+  # 管理者グループ（R8.2 / design §4.3）。メンバー付与は運用手順（T027 で文書化）
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: admin
+      Description: OriOriMap 管理者（通報対応・非公開化/削除の権限）
+      Precedence: 0
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${AWS::StackName}-spa'
+      UserPoolId: !Ref UserPool
+      # SPA なのでクライアントシークレットは持たない
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        # ブラウザからの通常ログイン。パスワードはネットワークに送出されない
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        # AWS 認証情報が必要な管理フロー。T003 の疎通検証と T036 の E2E で使う
+        # （ブラウザからは利用できない）。平文パスワードを送る
+        # ALLOW_USER_PASSWORD_AUTH は有効化しない
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+      # Google フェデレーション用（Google IdP 自体の追加は T013）
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs: !Ref AppCallbackUrls
+      LogoutURLs: !Ref AppLogoutUrls
+      # ユーザーの存在有無を推測させない（列挙攻撃対策）
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  # Google フェデレーションのリダイレクト先として必要（自前UIでも省略できない）。
+  # ManagedLoginVersion: 1 = classic hosted UI（Lite では唯一の選択肢）。
+  # ただし signInWithRedirect は identity_provider を指定するため、Cognito は
+  # 自前ページを描画せず即座に Google へ転送する（英語画面は表示されない）。
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref AWS::StackName
+      ManagedLoginVersion: 1
+
+  # -------------------------------------------------------------------------
+  # API: HTTP API（design §2）+ Cognito JWT Authorizer（design §4.3）
   # -------------------------------------------------------------------------
   HttpApi:
     Type: AWS::Serverless::HttpApi
@@ -173,6 +297,17 @@ Resources:
       DefaultRouteSettings:
         ThrottlingBurstLimit: 50
         ThrottlingRateLimit: 20
+      Auth:
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience: [!Ref UserPoolClient]
+        # fail-closed: 既定で認証を要求し、公開ルートだけが明示的に
+        # `Auth: { Authorizer: NONE }` でオプトアウトする。逆にすると
+        # 指定漏れが「気づかないまま公開」になるため、この向きを守ること
+        DefaultAuthorizer: CognitoJwtAuthorizer
 
   # -------------------------------------------------------------------------
   # Lambda: API 本体（design §4.2）。T002 時点のルートは GET /api/health のみ
@@ -191,16 +326,27 @@ Resources:
     Properties:
       CodeUri: backend/
       Handler: api.handler
-      Description: OriOriMap API（Hono）。T002 時点では GET /api/health のみ
+      Description: OriOriMap API（Hono）。T003 時点では /api/health と /api/health-auth のみ
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MainTable }
         - S3CrudPolicy: { BucketName: !Ref MediaBucket }
       Events:
+        # 公開ルート: DefaultAuthorizer を明示的にオプトアウトする
         Health:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /api/health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        # Authorizer 検証用（T003）。ハンドラは health と同一で、
+        # 差は JWT Authorizer を通すかどうかだけ
+        HealthAuth:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/health-auth
             Method: GET
 
   ApiFunctionLogGroup:
@@ -366,3 +512,18 @@ Outputs:
   AlertTopicArn:
     Description: アラート通知の SNS トピック ARN
     Value: !Ref AlertTopic
+  UserPoolId:
+    Description: Cognito User Pool ID（フロントの aws-amplify 設定に注入する）
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Cognito App client ID（SPA・シークレットなし）
+    Value: !Ref UserPoolClient
+  CognitoDomain:
+    Description: >-
+      Cognito ドメイン。Google フェデレーションのリダイレクト先。
+      Google OAuth クライアントの承認済みリダイレクト URI は
+      <この値>/oauth2/idpresponse を登録する（T010）。
+    Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+  JwtIssuer:
+    Description: HTTP API JWT Authorizer が検証する issuer
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'

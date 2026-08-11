@@ -14,7 +14,7 @@
 
 - フロントエンド: React + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui。地図は Geolonia JS API（MapLibre GL JS互換）
 - バックエンド: API Gateway (HTTP API) + JWT Authorizer + Lambda (nodejs24.x / TypeScript + Hono) + DynamoDB シングルテーブル + S3 + CloudFront（IaC: SAM）
-- 認証: Cognito User Pool（Liteティア）+ Google IdP + Hosted UI（Code + PKCE）
+- 認証: Cognito User Pool（Liteティア）+ Google IdP + **自前ログインUI**（`aws-amplify/auth` headless + shadcn/ui。SRP認証。Cognito の Hosted UI / managed login は使わない――日本語化が Essentials 以上限定のため。design §3「認証」行・§4.3）
 - 共有: `shared/` ワークスペースの Zod スキーマ・定数（LIMITS / KASANE_COLORS）がフロント・バック共通の単一ソース
 - リポジトリ: npm workspaces モノレポ（shared / backend / frontend / e2e）
 
