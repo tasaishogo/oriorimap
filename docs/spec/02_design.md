@@ -198,6 +198,7 @@ graph LR
 - ワークフロー構成:
   - `ci.yml`（PR・push時）: 依存インストール → lint（ESLint/Prettier）→ 型チェック（tsc）→ 単体テスト（Vitest: shared / backend / frontend）→ `sam validate` + フロントビルド（ビルド可能性の検証）
   - `deploy.yml`: mainへのpushで**dev環境へ自動デプロイ**。prodは`workflow_dispatch`（手動トリガー）+ GitHub Environmentsの承認保護付き。手順: `sam build && sam deploy`（API/インフラ）→ フロントビルド → `aws s3 sync` → CloudFrontキャッシュinvalidation
+- **デプロイ先AWSアカウント（2026-08-11 明記）**: 個人の共通インフラ用アカウント（ローカル profile: **`smb-infra`**・IAM Identity Center/SSO）。同アカウントには同パターンの先行プロジェクト（simple-cms）が稼働している。**`samconfig.toml` の全 config_env に `profile = "smb-infra"` を明記する**――未指定だと環境の既定プロファイルへ流れ、意図しないアカウントへデプロイされる（T002/T003 の dry-run で実際に発生させた）。CI は OIDC の AssumeRole でアカウントが決まるため profile を使わない。Google OAuth の SSM パラメータ（§4.3）も同アカウントの ap-northeast-1 に置く。
 - 環境: dev / prod の2スタック（`samconfig.toml`で分離）。フロントの環境別設定（APIオリジン・GeoloniaAPIキー等）はビルド時環境変数で注入（GeoloniaキーはURL制限付きの公開前提キーだが、リポジトリには直接コミットしない）
 - E2E（Playwright）はCIの必須ゲートにはせず、dev環境に対して手動またはリリース前に実行（実行時間とGeolonia表示回数の消費を抑えるため）
 - OIDC用IAMロールの初期作成はFoundationalタスク（03_tasks.md）で実施
