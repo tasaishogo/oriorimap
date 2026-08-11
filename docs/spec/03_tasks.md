@@ -24,7 +24,19 @@
   - **host**: 在席またはRemote Control接続時。対話が要る波・人間ステップ内包タスク（T031/T032）・IaC対話実行向き。「気づく」= notify.sh（`SLACK_WEBHOOK_URL`設定時）またはPushNotification、「応える」= Remote Control。無人ラン中はMacのスリープを無効化（caffeinate等）
   - **microvm**: 発射後非接続でよい波（アプリスライス群）向き。`tools/proj start oriorimap --tasks docs/spec/03_tasks.md`。**注意**: 進行監視はpull型（`proj status`/`proj report`。汎用のpush通知・Remote Controlは不可）/ 直列実行 / R2 codexクロスレビュー不可（R1+3レンズ縮退が報告に明記される）/ IaCタスクは**mvm-gate Lambda（cfn-guard）が合格ChangeSetを自動執行**し、違反時のみntfyでスマホへpush通知→人間が`proj approve`（mvm-poc Phase 2・2026-08-01実装。VM内エージェントは実行権を恒久に持たない）
   - **デプロイ先AWSアカウント（2026-08-11 確定）**: ローカル profile **`smb-infra`**（同アカウントには同パターンの先行プロジェクト simple-cms が稼働。Google OAuth の SSM パラメータもここ）。`samconfig.toml` の全 config_env に `profile` を明記済み――未指定だと環境の既定プロファイルへ流れる（T002/T003 の dry-run で実際に別アカウントへ向けてしまった。いずれも撤去済み・残置ゼロ確認済み）。design §4.7 参照
-  - **microvm の払い出しはアカウント違いのためやり直しが必要（2026-08-11 判明）**: 既存の `mvm-vend-oriorimap`（実行ロール・cfn-guard ゲート）は**別アカウント側**にあり、アプリを `smb-infra` へデプロイする本構成では VM 内エージェントから届かない。Phase C を microvm で回す前に (1) `smb-infra` へ mvm 共通基盤 `infra/vend-base.yaml` を人間レビューの下で1回デプロイ → (2) `tools/proj vend oriorimap` を `smb-infra` でやり直し → (3) 旧払い出しを `tools/proj retire` → (4) Geolonia APIキーの VM への注入経路（SSM）を用意 → (5) Phase C の Done条件を機械検証可能な形へ改訂（現状の「dev環境で〜手動確認」は VM で verify できない）。guardルールのリソース型allowlistへの Cognito 5型+Budgets 追記は再 vend 時に再適用する
+  - ~~**microvm の払い出しはアカウント違いのためやり直しが必要（2026-08-11 判明）**~~ → **解消（2026-08-12）**: mvm-poc セッションが smb-infra へ host モードで払い出しを実施し、当方で実測確認済み。実行ロール `mvm-proj-oriorimap` / CFn サービスロール `mvm-proj-oriorimap-cfn`（いずれも `mvm-boundary` 付き）/ artifacts バケット `oriorimap-sam-artifacts-820315588078`（PAB 全ON）/ guard=whitelist・protected=["oriorimap-dev","oriorimap-prod"]・eph-ttl 4h / trust=ローカル SSO ロール＋hub の同名ロール（将来の microvm 用に先付け）。`mvm-vend-oriorimap` は CREATE_COMPLETE。**CloudFront Function の guard 許可も hub・smb-infra 両方の gate に反映済み**で、本経路 E2E（local SSO → assume → `AWS::CloudFront::Function` を含む ChangeSet → gate `/execute` → executed → `/delete` 回収）で実証されている。なお **microvm（発射後非接続）にするには追加で hub 側 vend と R1b、および autopilot への targets 注入結線（mvm-poc 残件#16・実装中）が要る**。host モードは上記の払い出しだけで動く
+  - **host モードでの IaC 実行手順（2026-08-12・gate 経由。OIDC ロールは使わない）**:
+    1. `AWS_PROFILE=smb-infra` でローカル SSO から `mvm-proj-oriorimap` を assume（trust 登録済み）
+    2. `npm run sam:build` → ChangeSet 作成。`--s3-bucket oriorimap-sam-artifacts-820315588078` と **`--role-arn arn:aws:iam::820315588078:role/mvm-proj-oriorimap-cfn`** を指定（サービスロールのスティッキー参照を最初から正しく設定する）
+    3. `tools/proj gate oriorimap <stack> <changeset>` で cfn-guard 判定＋実行（`projects.json` 登録済みで smb-infra へ自動ルーティング）
+    4. 削除は `tools/proj delete-stack oriorimap <stack>`
+  - **verify スクリプトの assume ガード（host / microvm 両対応。2026-08-12・mvm-poc 提供）**: `mvm-target-env` は VM イメージにのみ存在しローカルには無いため、次のガードで同じスクリプトが両環境で動く。VM 内では hub ロールから spoke ロールへ降格し、ローカルでは素通しして SSO の ambient 資格情報で smb-infra に届く。一時クレデンシャルは3600秒有効なので、verify が1時間を超える場合は AWS 検証パートを後段に置くか直前で assume し直す
+
+    ```bash
+    if command -v mvm-target-env >/dev/null 2>&1 && [ -f /etc/mvm/targets.json ]; then
+      eval "$(mvm-target-env oriorimap)"
+    fi
+    ```
   - **microvm 投入前に必須: Phase C の Done条件を「1コードスパン」形式へ改訂する（2026-08-12 追記・mvm-poc セッションと相互確認済み）**: `tools/tasks-to-queue.mjs` の `deriveVerify` は Done条件から機械 verify を次の規則で取り出す――(1) Done条件そのものがコマンドとして読めれば literal 採用 / (2) **インラインコード（バッククォート）がちょうど1個**でコマンドとして読めればそれを採用 / (3) それ以外は null。**`looksLikeCommand` は CJK が混じると false を返す**ため、日本語混じりの Done条件は必ず (2) の判定に落ちる。現状の Phase C の書き方（例: 「`npm test -w backend`（maps系）が通り、dev環境で 作成→公開切替 を手動確認。非公開地図は404」）は**コードスパン1個＋散文**なので、**verify として `npm test -w backend` だけが採用され、本命の dev 環境検証が黙って落ちる**（機械判定は緑なのに実質未検証）。改訂の書式は以下。
     - **1タスク＝コードスパン厳密に1個**。検証コマンド以外をバッククォートで囲まない（スタック名や 404 などもバッククォート禁止。2個以上あると `ambiguous-multiple-code-spans` で verify=null になる）
     - 形は「Done条件: 」＋1コードスパン＋「（内容: …）」の括弧内散文。日本語ゼロの純コマンドにすれば literal 判定になるが、可読性から 1スパン＋括弧散文を推奨（mvm-poc 側の推奨も同じ）
