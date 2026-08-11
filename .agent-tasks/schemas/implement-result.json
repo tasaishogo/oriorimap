@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed", "blocked"],
+      "description": "実装作業の結果ステータス"
+    },
+    "summary": {
+      "type": "string",
+      "description": "実施した変更の要約（日本語、3文以内）"
+    },
+    "files_changed": {
+      "type": "array",
+      "description": "変更したファイルパスの一覧",
+      "items": { "type": "string" }
+    },
+    "notes": {
+      "type": "string",
+      "description": "レビュワーへの申し送り事項。なければ空文字列"
+    }
+  },
+  "required": ["status", "summary", "files_changed", "notes"],
+  "additionalProperties": false
+}

@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "failed", "blocked"],
+      "description": "テスト作成作業の結果ステータス"
+    },
+    "summary": {
+      "type": "string",
+      "description": "作成したテストの検証観点の要約（日本語、3文以内）"
+    },
+    "test_files": {
+      "type": "array",
+      "description": "作成したテストファイルパスの一覧",
+      "items": { "type": "string" }
+    },
+    "covered_criteria": {
+      "type": "array",
+      "description": "カバーした受入基準の識別子（spec の受入基準番号・R* 等）",
+      "items": { "type": "string" }
+    },
+    "notes": {
+      "type": "string",
+      "description": "検証できなかった受入基準とその理由、実装者への申し送り。なければ空文字列"
+    }
+  },
+  "required": ["status", "summary", "test_files", "covered_criteria", "notes"],
+  "additionalProperties": false
+}

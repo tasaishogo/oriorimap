@@ -1,0 +1,21 @@
+# Codex CLI プロジェクト設定（Claude Code障害時のフォールバック用）
+#
+# 有効化には各開発者が自分の ~/.codex/config.toml に以下を手動追記する必要がある（自動化不可）:
+#   [projects."/Users/shogotasai/dev/personal/oriorimap"]
+#   trust_level = "trusted"
+
+# AGENTS.md が正本。欠如時のみ CLAUDE.md にフォールバック
+project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# --- MCPミラー（.mcp.json + Claude側プラグイン同梱分から変換） ---
+[mcp_servers.aws-iac]
+command = "uvx"
+args = ["awslabs.aws-iac-mcp-server@latest"]
+
+[mcp_servers.aws-serverless]
+command = "uvx"
+args = ["awslabs.aws-serverless-mcp-server@latest"]
+
+[mcp_servers.shadcn]
+command = "npx"
+args = ["shadcn@latest", "mcp"]

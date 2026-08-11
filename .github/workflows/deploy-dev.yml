@@ -1,0 +1,69 @@
+# dev 環境への CD（共有 dev 環境の正本反映経路）
+#
+# 設計原則: dev 環境を更新できるのはこのワークフロー（= main にマージ済みの変更）だけ。
+#           ワーカー（エージェント）はタスク内で dev 環境を直接変更しない（単一ライター原則）。
+# 対応: docs/spec/02_design.md §4.7（deploy.yml の dev 部分）
+# 有効化手順（T005）:
+#   1. OIDC 用 IAM ロールを作成し、リポジトリ変数 DEV_DEPLOY_ROLE_ARN に設定
+#   2. リポジトリ変数 DEPLOY_ENABLED=true を設定
+#   3. SAM テンプレートに Outputs: SpaBucketName / DistributionId / AppUrl を定義（本CDの契約）
+# prod は workflow_dispatch + GitHub Environments 承認付きの別ジョブとして T031 で追加する
+name: deploy-dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # 無効化中に溜まった main の変更を手動で反映する catch-up 用
+
+permissions:
+  id-token: write # OIDC federation（長寿命クレデンシャルを渡さない）
+  contents: read
+
+concurrency:
+  group: deploy-dev # dev 環境の更新は直列化（同時デプロイ禁止）
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-1
+  DEV_STACK_NAME: oriorimap-dev
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm" }
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.DEV_DEPLOY_ROLE_ARN }} # dev 環境スコープの deploy 専用ロール
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy backend/infra (SAM)
+        run: |
+          sam build
+          sam deploy --stack-name "$DEV_STACK_NAME" --resolve-s3 \
+            --no-confirm-changeset --no-fail-on-empty-changeset \
+            --capabilities CAPABILITY_IAM --region "$AWS_REGION"
+      - name: Build & publish frontend (S3 + CloudFront invalidation)
+        run: |
+          npm ci
+          if ! npm run build -w frontend --if-present; then
+            echo "::notice::frontendビルド未整備（T007以降で有効化）— SPA配信は据え置き"
+            exit 0
+          fi
+          if [ ! -d frontend/dist ]; then echo "::notice::frontend/dist なし — スキップ"; exit 0; fi
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "$DEV_STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SpaBucketName'].OutputValue" --output text)
+          DIST_ID=$(aws cloudformation describe-stacks --stack-name "$DEV_STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+          aws s3 sync frontend/dist "s3://$BUCKET" --delete
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
+      - name: Smoke test
+        run: |
+          APP_URL=$(aws cloudformation describe-stacks --stack-name "$DEV_STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='AppUrl'].OutputValue" --output text)
+          curl -fsS --retry 3 --retry-delay 5 "$APP_URL/api/health"

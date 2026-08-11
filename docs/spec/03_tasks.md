@@ -18,16 +18,18 @@
 - `依存:`: 先に完了が必要なタスクID
 - `_Requirements:_`: 対応する要件ID（docs/spec/01_requirements.md）
 
-## 運用注記: 【人間】タスクと無人実行（project-autopilot）の関係
+## 運用注記: 実行モードと【人間】タスクの扱い（2026-08-11改訂: host/microvm併用前提）
 
-- 【人間】タスク（T008, T010, T011, T030, T039）は**無人パイプラインのキューに投入しない**。project-autopilot（特にmicrovmモード）は人間介入が必要になった時点でpush通知する仕組みが未整備のため（通知はhost/sandboxモードのnotify.sh束のみ。microvmは `proj status`/`proj report` のpull型）、**各波の投入前に、その波が依存する【人間】タスクを先に完了させる**運用とする
+- **実行モードは波（run）ごとに選択する**（project-autopilot Phase 1で毎回確定）:
+  - **host**: 在席またはRemote Control接続時。対話が要る波・人間ステップ内包タスク（T031/T032）・IaC対話実行向き。「気づく」= notify.sh（`SLACK_WEBHOOK_URL`設定時）またはPushNotification、「応える」= Remote Control。無人ラン中はMacのスリープを無効化（caffeinate等）
+  - **microvm**: 発射後非接続でよい波（アプリスライス群）向き。`tools/proj start oriorimap --tasks docs/spec/03_tasks.md`。**注意**: 進行監視はpull型（`proj status`/`proj report`。汎用のpush通知・Remote Controlは不可）/ 直列実行 / R2 codexクロスレビュー不可（R1+3レンズ縮退が報告に明記される）/ IaCタスクは**mvm-gate Lambda（cfn-guard）が合格ChangeSetを自動執行**し、違反時のみntfyでスマホへpush通知→人間が`proj approve`（mvm-poc Phase 2・2026-08-01実装。VM内エージェントは実行権を恒久に持たない）
+  - microvmの払い出し（`tools/proj vend oriorimap --repo <repo>`）は**初回microvm波の直前に実施**（just-in-time。Phase Bのタスクはvendに依存しない）。最小権限は境界型（専用ロール+Permissions Boundary+Budget+短命トークン+ChangeSetゲート）で担保される設計のため実装前でも払い出せるが、急ぐ理由もない
+- 【人間】タスク（T008, T010, T011, T030, T039）は**どちらのモードでも無人キューに投入しない**。各波の投入前に、その波が依存する【人間】タスクを先に完了させる
 - 具体的な先行実施の目安: T008（Geoloniaキー発行）・T010（Google OAuth）・T011（問い合わせ送付）は依存がなく**いつでも実施可能なため、Phase B開始前にまとめて実施推奨**。T039（devドメイン登録）はT005完了直後。T030（Cloudflare DNS）はT031着手前
-- T031・T032は人間ステップを内包する協調タスクのため、無人実行ではなく対話実行とする（在席またはRemote Control接続時）
-- **離席時の対応（2026-08-11 ユーザー決定）**: Claude Code Maxプランの**Remote Control**を利用し、hostモードのオーケストレータセッションへ離席中もスマホ等から承認・応答する運用とする。「気づく」= notify.sh（`SLACK_WEBHOOK_URL`設定時）またはPushNotification、「応える」= Remote Control、と役割分担。※Remote Controlはローカルの生きたセッションが前提のため**hostモードと組み合わせる**（microvmモードの通知ギャップは解消しない）。無人ラン中はMacのスリープを無効化（caffeinate等）しておく
 
 ## Phase A: Setup
 
-- [ ] T001 project-bootstrap による開発環境セットアップ
+- [x] T001 project-bootstrap による開発環境セットアップ（2026-08-11 完了）
   - 内容: docs/spec/ を入力として project-bootstrap Skill を実行し、Skill/MCP/Hooks/CLAUDE.md/Linter（P3: React+P2-Node構成）を構成する。npm workspaces（shared/backend/frontend/e2e）の初期化を含む
   - Done条件: bootstrap の Phase 5 検証（mcp list / hooks手動実行）が通り、`npm install` がルートで成功する
   - _Requirements: 全要件共通_

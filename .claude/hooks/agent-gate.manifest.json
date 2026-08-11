@@ -1,0 +1,13 @@
+{
+  "_comment": "agent-gate.sh のピン台帳テンプレート。.claude/hooks/agent-gate.manifest.json に配置（protect-config の保護対象）。セットアップ時に scripts/agent/ の各スクリプトの SHA-256 を実値でピンする（shasum -a 256 scripts/agent/*.sh）。プレースホルダのままだと該当スクリプトは fail-closed で deny される（安全側）。以後の更新は人間のみ: レジストリスクリプトを変更したら、内容をレビューした上でハッシュを更新する。",
+  "scripts": {
+    "scripts/agent/codex-launch.sh": "01b84229e18b95f56723bf3e2da039e733138e94e8ee56a624499f36f9c7d30c",
+    "scripts/agent/notify.sh": "c33e067156045ff57939c1fa4754cece7ca8354b0dd4af012538dc1931a19436",
+    "scripts/agent/pr-create.sh": "4a6b792b9e29b5eee28ab1cad2d8241877eedacdc66e2ef5dcfdce4e4415bc47",
+    "scripts/agent/pr-label.sh": "41df55aecfa7faaeec713a637880592266f2ffecfc58fd8fca5339523def7fc5",
+    "scripts/agent/verdict.sh": "a2a87810799bca4928a27b32a0be4fcffc5279d18974b46bebcd61508c2b4545",
+    "scripts/agent/worker-launch.sh": "24386ef544616d32071b7812f9d4bca21e4e3ec987bd07fbe90ce99b4707a502",
+    "scripts/agent/wt-push.sh": "32ff22e7f54376f917e4e87ac5bbe7b0385dc5fc28d656c133ee5af36d791b0b",
+    "scripts/agent/wt-setup.sh": "cd70ba59c829d8078555257323841aaa809fe3b7d02a077ee13e9dd6f1be3860"
+  }
+}

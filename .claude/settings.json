@@ -1,0 +1,106 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(jq *)",
+      "Bash(npm run *)",
+      "Bash(npm install)",
+      "Bash(npm test*)",
+      "Bash(npx *)",
+      "Bash(scripts/agent/worker-launch.sh *)",
+      "Bash(scripts/agent/wt-setup.sh *)",
+      "Bash(scripts/agent/wt-push.sh *)",
+      "Bash(scripts/agent/pr-create.sh *)",
+      "Bash(scripts/agent/pr-label.sh *)",
+      "Bash(scripts/agent/notify.sh *)",
+      "Bash(scripts/agent/verdict.sh *)",
+      "Bash(node scripts/approval-telemetry.mjs *)",
+      "Bash(herdr pane *)",
+      "Bash(herdr wait *)",
+      "Bash(herdr agent *)",
+      "Bash(gh run watch *)",
+      "Bash(gh run view *)",
+      "Bash(gh run download *)",
+      "Write(.agent-tasks/**)",
+      "Edit(.agent-tasks/**)"
+    ],
+    "deny": [
+      "Edit(.env)",
+      "Write(.env)",
+      "Read(.env)",
+      "Bash(herdr server stop)",
+      "Bash(herdr server stop *)"
+    ],
+    "ask": [
+      "Bash(git push *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-files.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-config.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-tests.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/block-dangerous.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-gate.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/format-ts.sh\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-ts.sh\"",
+            "timeout": 240
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Organization: personal project (shogotasai). Primary use: hobby OSS web service development with the project-autopilot unattended pipeline (host mode + Remote Control)",
+      "Repository visibility: private during development, planned to become public OSS (github.com/shogotasai/oriorimap)",
+      "Cloud provider(s): AWS (ap-northeast-1, SAM/CloudFormation). Actual cloud changes go through CI (deploy-dev.yml) only; agent-initiated apply/deploy is not expected in unattended runs. Interactive IaC tasks are run with the human present",
+      "Autopilot run artifacts: task-PM agents record per-task state and evidence under .agent-tasks/<TASK_ID>/ inside the repository and its worktrees (report.md, escalation.md, events.jsonl, status.json, evidence/); these are internal pipeline work records",
+      "Fixed entry points: shell operations needed by the pipeline are wrapped as registry scripts under scripts/agent/ (worker-launch.sh, wt-setup.sh, wt-push.sh, pr-create.sh, pr-label.sh, notify.sh, verdict.sh) and as herdr verbs (herdr pane / herdr wait / herdr agent); a PreToolUse hook (agent-gate.sh) verifies registry scripts against SHA-256 hashes pinned in .claude/hooks/agent-gate.manifest.json before allowing them"
+    ],
+    "allow": ["$defaults"]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.gnupg",
+        "~/.config/gh",
+        "~/.claude/settings.json"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "registry.npmjs.org",
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "api.anthropic.com",
+        "*.amazonaws.com",
+        "*.geolonia.com",
+        "geolonia.github.io",
+        "msearch.gsi.go.jp"
+      ]
+    },
+    "credentials": {
+      "envVars": {
+        "mode": "mask"
+      }
+    }
+  }
+}

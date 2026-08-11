@@ -1,0 +1,8 @@
+# 承認済み仕様書は整形しない（承認時点の内容を保持）
+docs/spec/
+# 自動生成物
+package-lock.json
+.aws-sam/
+dist/
+build/
+coverage/

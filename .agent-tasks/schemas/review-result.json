@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "properties": {
+    "approved": {
+      "type": "boolean",
+      "description": "重大な問題がなく承認できる場合はtrue"
+    },
+    "summary": {
+      "type": "string",
+      "description": "レビュー結果の要約（日本語、3文以内）"
+    },
+    "findings": {
+      "type": "array",
+      "description": "指摘事項の一覧。指摘がなければ空配列",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "major", "minor", "info"]
+          },
+          "file": {
+            "type": "string",
+            "description": "対象ファイルパス"
+          },
+          "description": {
+            "type": "string",
+            "description": "指摘内容（日本語）"
+          }
+        },
+        "required": ["severity", "file", "description"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["approved", "summary", "findings"],
+  "additionalProperties": false
+}

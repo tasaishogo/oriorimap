@@ -1,0 +1,117 @@
+# 正本品質ゲート（required status checks に登録する5ジョブ）
+#
+# 設計原則: 「エージェントが制御できる環境（worktree）での検証結果は参考値。
+#            正本は必ず CI 側で再計算する」（自己申告スコアは採用しない）
+# 対応: docs/spec/02_design.md §4.7（ci.yml 相当）
+# 段階ゲート: CTRFレポーター（T006）・stryker設定・AI review用secretが未整備の間は
+#             該当ステップが notice 付きでスキップされる（置き逃げではなく段階導入）
+name: pipeline-gates
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm" }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm" }
+      - run: npm ci
+      # CTRF を出力させ、verdict.mjs で機械判定（エージェントのローカル結果は使わない）
+      # T006 で vitest の CTRF レポーター出力先を ctrf/ctrf-report.json に構成する
+      - run: rm -rf ctrf && mkdir -p ctrf && npm test
+      - name: verdict (機械判定)
+        run: |
+          if [ ! -f ctrf/ctrf-report.json ]; then
+            echo "::notice::CTRFレポート未生成（T006でvitest CTRFレポーターを構成するまでverdictはスキップ）"
+            exit 0
+          fi
+          node scripts/verdict.mjs --task-id "ci-${{ github.event.pull_request.number }}" \
+            --commit-sha "${{ github.sha }}" --ctrf ctrf/ctrf-report.json \
+            --out ctrf/verdict.json --gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: unit-ctrf, path: ctrf/ }
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # recipe: shared-dev-integration（dev 環境エンドポイントに対する結合テスト。T005 以降に配線）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm" }
+      - run: npm ci
+      - run: rm -rf ctrf && mkdir -p ctrf && npm run test:integration --workspaces --if-present
+      - name: verdict (機械判定)
+        run: |
+          if [ ! -f ctrf/ctrf-integration.json ]; then
+            echo "::notice::結合テスト未整備（dev環境配線後に有効化）— verdictスキップ"
+            exit 0
+          fi
+          node scripts/verdict.mjs --task-id "ci-int-${{ github.event.pull_request.number }}" \
+            --commit-sha "${{ github.sha }}" --ctrf ctrf/ctrf-integration.json \
+            --out ctrf/verdict-integration.json --gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: integration-ctrf, path: ctrf/ }
+
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "npm" }
+      - run: npm ci
+      # PR 変更ファイルのみに incremental 実行。スコアは CI が計算する（自己申告は採用しない）
+      # 閾値は stryker.config.json 側で {high: 90, low: 75, break: 60} を設定（unittest-quality導入時）
+      - name: mutation test (changed files only)
+        run: |
+          if [ ! -f stryker.config.json ]; then
+            echo "::notice::stryker未設定（テスト基盤タスクで導入するまでスキップ）"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'backend/src/**/*.ts' 'shared/src/**/*.ts' 'frontend/src/**/*.ts?' | paste -sd, -)
+          if [ -z "$CHANGED" ]; then echo "no source changes; skip"; exit 0; fi
+          npx stryker run --mutate "$CHANGED"
+
+  ai-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # R1 レビューの独立再実行（別環境・別コンテキスト）。コメントのみ・マージ権限なし。
+    # 有効化: リポジトリ変数 ENABLE_AI_REVIEW=true + secrets.ANTHROPIC_API_KEY 登録
+    if: ${{ vars.ENABLE_AI_REVIEW == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            この PR の diff を spec（docs/spec/01_requirements.md の該当要件、docs/spec/02_design.md の該当設計）に照らしてレビューせよ。
+            異常系・境界・認可（公開系/オーナー系の分離）・embed CSP・冪等性を重点。指摘はインラインコメントで。
+            実装者の説明文ではなく diff とテスト結果の事実のみを根拠とすること。
+          claude_args: "--max-turns 10"
