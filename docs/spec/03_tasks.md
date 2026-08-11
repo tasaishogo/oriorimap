@@ -23,7 +23,7 @@
 - **実行モードは波（run）ごとに選択する**（project-autopilot Phase 1で毎回確定）:
   - **host**: 在席またはRemote Control接続時。対話が要る波・人間ステップ内包タスク（T031/T032）・IaC対話実行向き。「気づく」= notify.sh（`SLACK_WEBHOOK_URL`設定時）またはPushNotification、「応える」= Remote Control。無人ラン中はMacのスリープを無効化（caffeinate等）
   - **microvm**: 発射後非接続でよい波（アプリスライス群）向き。`tools/proj start oriorimap --tasks docs/spec/03_tasks.md`。**注意**: 進行監視はpull型（`proj status`/`proj report`。汎用のpush通知・Remote Controlは不可）/ 直列実行 / R2 codexクロスレビュー不可（R1+3レンズ縮退が報告に明記される）/ IaCタスクは**mvm-gate Lambda（cfn-guard）が合格ChangeSetを自動執行**し、違反時のみntfyでスマホへpush通知→人間が`proj approve`（mvm-poc Phase 2・2026-08-01実装。VM内エージェントは実行権を恒久に持たない）
-  - microvmの払い出し（`tools/proj vend oriorimap --repo <repo>`）は**初回microvm波の直前に実施**（just-in-time。Phase Bのタスクはvendに依存しない）。最小権限は境界型（専用ロール+Permissions Boundary+Budget+短命トークン+ChangeSetゲート）で担保される設計のため実装前でも払い出せるが、急ぐ理由もない
+  - microvmの払い出しは**実施済み**（2026-08-11 `tools/proj vend oriorimap`。実行ロール `mvm-proj-oriorimap`・CFnロール・Boundary・Budget・GitHub App連携・ruleset）。guardルールのリソース型allowlistには本プロジェクト向けにCognito 5型+Budgetsを追記済み（gate Lambdaへ反映済み）。**rulesetによりmainへの直pushは禁止・PR必須**（人間のマージが波を解禁する律速点）。microvm波の起動は `tools/proj start oriorimap --tasks docs/spec/03_tasks.md`
 - 【人間】タスク（T008, T010, T011, T030, T039）は**どちらのモードでも無人キューに投入しない**。各波の投入前に、その波が依存する【人間】タスクを先に完了させる
 - 具体的な先行実施の目安: T008（Geoloniaキー発行）・T010（Google OAuth）・T011（問い合わせ送付）は依存がなく**いつでも実施可能なため、Phase B開始前にまとめて実施推奨**。T039（devドメイン登録）はT005完了直後。T030（Cloudflare DNS）はT031着手前
 
