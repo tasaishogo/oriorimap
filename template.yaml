@@ -53,9 +53,20 @@ Parameters:
     Type: CommaDelimitedList
     Default: http://localhost:5173/
     Description: サインアウト後のリダイレクト先（Cognito App client の LogoutURLs）。
+  UseMvmBoundary:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Lambda 実行ロールに Permissions Boundary `mvm-boundary` を付けるか。
+      本プロジェクトの IaC は mvm-gate（cfn-guard）経由で実行され、
+      10-iam-role.guard が全 AWS::IAM::Role に PermissionsBoundary を要求する
+      （付けないと CFn サービスロール側の boundary Deny でデプロイ自体も失敗する）。
+      mvm 環境以外へ流用する場合のみ false にする。
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  UsesMvmBoundary: !Equals [!Ref UseMvmBoundary, 'true']
   ShouldCreateBudget: !And
     - !Condition HasAlertEmail
     - !Equals [!Ref CreateBudget, 'true']
@@ -70,6 +81,11 @@ Globals:
     Architectures: [arm64]
     Timeout: 15
     MemorySize: 512
+    # 生成される実行ロールに Permissions Boundary を付ける（cfn-guard 10-iam-role が要求）
+    PermissionsBoundary: !If
+      - UsesMvmBoundary
+      - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
+      - !Ref 'AWS::NoValue'
     Environment:
       Variables:
         MAIN_TABLE: !Ref MainTable
