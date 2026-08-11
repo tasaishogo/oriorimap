@@ -194,14 +194,20 @@ graph LR
 
 ### 4.7 CI/CD（GitHub Actions）
 
-- 方針: OSS公開リポジトリのため**GitHub Actions**を採用（公開リポジトリは実行無料）。AWS認証は**OIDCフェデレーション**（`aws-actions/configure-aws-credentials`によるAssumeRole。長期アクセスキーをGitHub Secretsに保存しない。IAMロールの信頼ポリシーは当該リポジトリ・対象ブランチに限定）
+- 方針: OSS公開リポジトリのため**GitHub Actions**を採用（公開リポジトリは実行無料）。ただし **GitHub Actions に AWS 認証情報を一切持たせない**（下記「デプロイ経路」参照。2026-08-12 改訂）
 - ワークフロー構成:
-  - `ci.yml`（PR・push時）: 依存インストール → lint（ESLint/Prettier）→ 型チェック（tsc）→ 単体テスト（Vitest: shared / backend / frontend）→ `sam validate` + フロントビルド（ビルド可能性の検証）
-  - `deploy.yml`: mainへのpushで**dev環境へ自動デプロイ**。prodは`workflow_dispatch`（手動トリガー）+ GitHub Environmentsの承認保護付き。手順: `sam build && sam deploy`（API/インフラ）→ フロントビルド → `aws s3 sync` → CloudFrontキャッシュinvalidation
+  - `pipeline-gates.yml`（PR時。bootstrap 設置済みで **ci.yml の役割を兼ねる**）: lint（ESLint/Prettier）→ 型チェック（tsc）→ 単体テスト（Vitest）→ 結合 → mutation。T005 で **`build` ジョブ（`sam validate` + `sam build` + フロントビルド）を追加**する。**AWS へのアクセスは一切行わない**（`sam validate` は cfn-lint によるローカル検証のみで認証情報不要）
+  - ~~`ci.yml`~~ → **新規作成しない**。上記に集約する（重複した CI 実行とシグナルを避ける）
+  - ~~`deploy.yml`~~ → **廃止（2026-08-12）**。下記「デプロイ経路」に置き換え
+- **デプロイ経路（2026-08-12 改訂・OIDC ロールを作らない設計）**:
+  - **dev**: MicroVM 内のエージェント（ロール `mvm-proj-oriorimap`）が ChangeSet を作成し、**mvm-gate Lambda（cfn-guard 同梱）が合格分を自動 ExecuteChangeSet** する。エージェントは `ExecuteChangeSet` を恒久に持たない。guard 違反時のみ ntfy でスマホ通知 → 人間が `proj approve`。SPA の配信（`aws s3 sync` + CloudFront invalidation）は ChangeSet ではないため同エージェントがデータプレーン権限で実行する
+  - **prod**: T031 以降、**人間が明示的にデプロイ**する（自動デプロイ経路を持たない）
+  - **採用理由**: gate Lambda は Function URL が `AuthType=AWS_IAM` で、かつ呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため、**GitHub Actions からは呼べない**（CD 専用ロールを作っても 403）。また `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外で、CD を残すなら結局 OIDC ロールに CFn 書き込み権限とデータプレーン権限の両方が要る。**IaC の実行経路を gate 1本に一元化する**ため CD ごと廃止した
+  - **トレードオフ**: dev は「main の姿」ではなく「エージェントの検証環境」になる。PR が却下された変更も dev に残るため、**次の波の先頭で main から再デプロイして揃える**。並列実行では成立しない設計（複数エージェントが dev を奪い合う）で、**MicroVM の直列・単一ワーカー運用が前提**
 - **デプロイ先AWSアカウント（2026-08-11 明記）**: 個人の共通インフラ用アカウント（ローカル profile: **`smb-infra`**・IAM Identity Center/SSO）。同アカウントには同パターンの先行プロジェクト（simple-cms）が稼働している。**`samconfig.toml` の全 config_env に `profile = "smb-infra"` を明記する**――未指定だと環境の既定プロファイルへ流れ、意図しないアカウントへデプロイされる（T002/T003 の dry-run で実際に発生させた）。CI は OIDC の AssumeRole でアカウントが決まるため profile を使わない。Google OAuth の SSM パラメータ（§4.3）も同アカウントの ap-northeast-1 に置く。
 - 環境: dev / prod の2スタック（`samconfig.toml`で分離）。フロントの環境別設定（APIオリジン・GeoloniaAPIキー等）はビルド時環境変数で注入（GeoloniaキーはURL制限付きの公開前提キーだが、リポジトリには直接コミットしない）
 - E2E（Playwright）はCIの必須ゲートにはせず、dev環境に対して手動またはリリース前に実行（実行時間とGeolonia表示回数の消費を抑えるため）
-- OIDC用IAMロールの初期作成はFoundationalタスク（03_tasks.md）で実施
+- ~~OIDC用IAMロールの初期作成はFoundationalタスク（03_tasks.md）で実施~~ → **不要（2026-08-12）**。上記「デプロイ経路」により OIDC ロール・effect-plane の `*-eph-deployer` / `*-eph-tester` はいずれも作らない
 
 ### 4.8 運用ルーチン（Geolonia表示回数の把握）
 

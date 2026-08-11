@@ -61,12 +61,19 @@
   - 依存: T003
   - _Requirements: 全画面・embed要件共通_
 
-- [ ] T005 [serial] CI/CD（GitHub Actions + OIDC）と共有dev環境への初回デプロイ・疎通（Wave 0）
-  - 対象: .github/workflows/ci.yml, .github/workflows/deploy.yml, template.yaml（OIDC用IAMロール）
-  - 内容: design §4.7 のとおり ci.yml（lint/型/テスト/sam validate）と deploy.yml（main→dev自動 / prod=workflow_dispatch+Environments承認）を作成し、OIDCフェデレーション用IAMロールを整備。共有dev環境へ初回デプロイ
-  - Done条件: mainへのマージでdevスタックが自動デプロイされ、`curl <dev CloudFrontドメイン>/api/health` が200（health-only。機能スライスへの依存は持たない）
-  - 依存: T004
+- [ ] T005 [serial] CI（GitHub Actions）と共有dev環境の初回構築・疎通（Wave 0）
+  - **2026-08-12 改訂（OIDC ロールを作らない設計に変更）**: 当初の「CI/CD + OIDC フェデレーション」から **CD ごと廃止**し、dev の更新経路を **mvm-gate Lambda（cfn-guard）に一元化**した。理由: gate は Function URL が `AuthType=AWS_IAM` で呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため **GitHub Actions からは呼べず**（CD 専用ロールを作っても403）、かつ `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外――CD を残すと OIDC ロールに CFn 書き込みとデータプレーンの両方の権限が必要になり、IaC 実行経路が2系統になる。詳細は design §4.7「デプロイ経路」
+  - 対象: `.github/workflows/pipeline-gates.yml`（**build ジョブを追加**）、`.github/workflows/deploy-dev.yml`（**削除**）。template.yaml の変更なし（OIDC 用 IAM ロールは作らない）
+  - **ci.yml は新規作成しない（2026-08-12 判明）**: bootstrap が設置した `pipeline-gates.yml` のヘッダーに「対応: docs/spec/02_design.md §4.7（ci.yml 相当）」と明記されており、lint / 型チェック / format / 単体テスト / 結合 / mutation は既に PR トリガーで実行されている。**欠けているのは `sam validate` とビルド可能性の検証だけ**なので、新規ファイルを作らず同ファイルに `build` ジョブを足す（重複した CI 実行と重複したシグナルを避ける）
+  - 内容: `pipeline-gates.yml` に `build` ジョブ（`npm ci` → `npm run sam:validate` → `npm run sam:build` → `npm run build -w frontend`。**AWS 認証情報は不要**）を追加し、bootstrap 設置の deploy-dev.yml を削除する。あわせて dev スタック（`oriorimap-dev`）を初回構築する
+  - **注記（required status checks）**: `build` ジョブを追加したら、GitHub の branch ruleset の required status checks にも登録する（人間の操作）
+  - **実施順序（2段階。CFn サービスロールのスティッキー参照のため分ける）**:
+    - **T005-a（先行・いつでも可）**: ci.yml 作成 + deploy-dev.yml 削除
+    - **T005-b（microvm 再 vend の後）**: dev スタックの初回構築。**必ず `--role-arn mvm-proj-oriorimap-cfn` を指定して作る**――CFn スタックはサービスロールをスティッキー参照するため、管理者権限で先に作ると後から VM が更新する際に役割が切り替わり、権限ギャップが本番同然の場所で初めて露見する（microvm-mode の落とし穴に実事故として記録あり）
+  - Done条件: (1) PR に対して `pipeline-gates.yml` の `build` ジョブが `sam validate` / `sam build` / フロントビルドを実行して緑になる (2) dev スタックが `mvm-proj-oriorimap-cfn` をサービスロールとして構築され、`curl <dev CloudFrontドメイン>/api/health` が200（health-only。機能スライスへの依存は持たない） (3) `deploy-dev.yml` が削除され、リポジトリに AWS 認証情報を必要とするワークフローが存在しない
+  - 依存: T004（+ T005-b は microvm 再 vend の完了）
   - **注記（ガード対象パス）**: `.github/workflows/` は project-autopilot 保護パス。**当該部分は人間著作差分**（人間がメインチェックアウトで著作→オーケストレータがblob検証つきverbatim移送・human-authored明記コミット）として扱うこと
+  - **注記（esbuild）**: ci.yml で `sam validate` 以上（`sam build`）を行う場合は `npm ci` の後に **`npm run sam:build`** で呼ぶこと。素の `sam build` は npm workspaces の巻き上げにより `Cannot find esbuild` で失敗する（AGENTS.md P2-Node 規約）
   - _Requirements: 全要件共通（デプロイ経路）_
 
 - [ ] T006 [P] バックエンド骨格（Hono + 共有Zodスキーマ + テスト基盤）
