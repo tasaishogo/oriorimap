@@ -25,7 +25,8 @@
   - **microvm**: 発射後非接続でよい波（アプリスライス群）向き。`tools/proj start oriorimap --tasks docs/spec/03_tasks.md`。**注意**: 進行監視はpull型（`proj status`/`proj report`。汎用のpush通知・Remote Controlは不可）/ 直列実行 / R2 codexクロスレビュー不可（R1+3レンズ縮退が報告に明記される）/ IaCタスクは**mvm-gate Lambda（cfn-guard）が合格ChangeSetを自動執行**し、違反時のみntfyでスマホへpush通知→人間が`proj approve`（mvm-poc Phase 2・2026-08-01実装。VM内エージェントは実行権を恒久に持たない）
   - microvmの払い出しは**実施済み**（2026-08-11 `tools/proj vend oriorimap`。実行ロール `mvm-proj-oriorimap`・CFnロール・Boundary・Budget・GitHub App連携・ruleset）。guardルールのリソース型allowlistには本プロジェクト向けにCognito 5型+Budgetsを追記済み（gate Lambdaへ反映済み）。**rulesetによりmainへの直pushは禁止・PR必須**（人間のマージが波を解禁する律速点）。microvm波の起動は `tools/proj start oriorimap --tasks docs/spec/03_tasks.md`
 - 【人間】タスク（T008, T010, T011, T030, T039）は**どちらのモードでも無人キューに投入しない**。各波の投入前に、その波が依存する【人間】タスクを先に完了させる
-- 具体的な先行実施の目安: T008（Geoloniaキー発行）・T010（Google OAuth）・T011（問い合わせ送付）は依存がなく**いつでも実施可能なため、Phase B開始前にまとめて実施推奨**。T039（devドメイン登録）はT005完了直後。T030（Cloudflare DNS）はT031着手前
+- 具体的な先行実施の目安: ~~T008（Geoloniaキー発行）~~**完了(2026-08-11)**・T010（Google OAuth）・~~T011（問い合わせ送付）~~**不要につきクローズ(2026-08-11)**。T039（devドメイン登録）はT005完了直後。T030（Cloudflare DNS）はT031着手前
+- **T010 の分割実施（2026-08-11 追記）**: Google OAuth は「①OAuth同意画面の構成」と「②クライアントID/シークレットの作成」に分けられる。①はリダイレクトURIを必要とせず**T003を待たずに先行実施できる**（スコープを `openid`/`email`/`profile` に限れば機微スコープなしのため Google の審査は不要。ただし「テスト」のままだと制約があるので「本番環境に公開」まで進める）。②は Cognito ドメイン確定後――リダイレクトURIは `https://<cognito-domain>/oauth2/idpresponse`。ドメインのプレフィックスは **スタック名と同一**（T003 実装で `!Ref AWS::StackName`）＝ **dev=`oriorimap-dev` / prod=`oriorimap-prod`**。正確な値は各スタックの Output `CognitoDomain` が返す（dry-run では `https://oriorimap-dryrun.auth.ap-northeast-1.amazoncognito.com` を実測確認済み）。格納先は SSM パラメータ `/oriorimap/dev/google/client-id`（String）と `/oriorimap/dev/google/client-secret`（SecureString）――Secrets Manager は $0.40/月かかるため不採用。T013 で CD が解決し `--parameter-overrides` で注入する（テンプレートに値を書かない）
 
 ## Phase A: Setup
 
@@ -81,9 +82,10 @@
   - **注記（ガード対象パス）**: テストランナー設定ファイル（vitest.config）は保護パターンに交差するため**人間著作差分**として扱うこと
   - _Requirements: 全画面要件共通_
 
-- [ ] T008 [P] 【人間】Geoloniaアカウント作成・APIキー発行
+- [x] T008 [P] 【人間】Geoloniaアカウント作成・APIキー発行（2026-08-11 完了）
   - 内容: app.geolonia.com でアカウントを作成し、APIキーを発行する（開発用URL `http://localhost:*` 等は無料・カウント対象外のため登録不要。dev CloudFrontドメインの登録はT005完了後にT020の前提として実施する）
   - Done条件: APIキーが発行され、localhost での地図表示に使える状態（キー値は frontend の環境変数へ）
+  - **完了記録（2026-08-11）**: キー発行済み。設置先は2箇所――(1) ローカル開発用 `frontend/.env.local` の `VITE_GEOLONIA_API_KEY`（`.gitignore` の `.env.*` で除外済み）、(2) CI/CDビルド用の GitHub Actions リポジトリ変数 `VITE_GEOLONIA_API_KEY`。**キー値は docs・リポジトリに一切記載しない**（URL制限付きの公開前提キーだが design §4.7 の方針に従う）
   - 依存: なし
   - _Requirements: R2, R4系の前提_
 
@@ -106,11 +108,9 @@
   - 依存: T003
   - _Requirements: R1.2の前提_
 
-- [ ] T011 [P] 【人間】Geolonia帰属表記義務の問い合わせ送付
-  - 内容: Geolonia問い合わせフォームから、クレジット/帰属表記義務の有無・表記方法を質問する（文面はエージェントが起案）。要件§9のリリースゲート項目
-  - Done条件: 問い合わせが送付され、送付日時と文面が docs/spec/ 配下に記録されている
-  - 依存: なし
-  - _Requirements: §4法務・表記（リリースゲート）_
+- [x] T011 [P] 【人間】~~Geolonia帰属表記義務の問い合わせ送付~~ → **不要としてクローズ（2026-08-11・送付せず）**
+  - **クローズ理由**: 問い合わせを送る前に調査で解決したため送付不要と判断。(a) ユーザー側でGeoloniaのホームページ・開発者ドキュメントを網羅確認したが帰属に関する記載なし、(b) エージェントがスタイル実体 `https://cdn.geolonia.com/style/geolonia/basic/ja.json` を直接検証し、主データソース `geolonia` に `attribution` フィールドが存在しないことを確認（提供者自身が表記を要求していない一次証拠）、(c) 無償OSSではなく商用サービスの契約利用。詳細は要件決定ログ #29-1
+  - _Requirements: §4法務・表記（リリースゲート → 解除）_
 
 ## Phase C: 機能スライス
 
@@ -269,10 +269,9 @@
   - 依存: T031
   - _Requirements: R1.1, R1.4（本番運用の前提）_
 
-- [ ] T033 【人間】Geolonia帰属表記の回答確認（リリースゲート判定）
-  - 内容: T011の問い合わせ回答を確認し、表記方法を要件決定ログ・設計書へ追記。回答内容に応じて表記実装（T009の帰属表示）を調整。**回答確認まで一般公開は行わない**（要件§9）
-  - Done条件: 回答内容と対応が docs/spec/ に記録され、リリースゲート判定（公開可/不可）が明記されている
-  - 依存: T011
+- [x] T033 【人間】~~Geolonia帰属表記の回答確認~~ → **リリースゲート解除としてクローズ（2026-08-11）**
+  - **判定結果: 公開可**。T011 の調査結果をもって要件§9 のリリースゲートを解除した。記録先: 要件定義書 §4法務・表記 / 決定ログ #29 #29-1 / §9、設計書 §10
+  - **T009 への申し送り（実装は変更なし）**: Geolonia 自身のクレジットは不要だが、同スタイルの `dem` ソースが `© GSI Japan` を宣言しており国土地理院の出典明記義務は課金の有無と独立に残る。MapLibre の `AttributionControl` は既定で有効でこれを自動表示するため**追加実装は不要**。T009 の受入条件は「**`attributionControl: false` を渡してコントロールを無効化しないこと**」のみ
   - _Requirements: §4法務・表記_
 
 - [ ] T034 運用仕上げ: runbook・復元テスト・アラート確認
