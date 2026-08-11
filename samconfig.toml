@@ -1,0 +1,45 @@
+# SAM デプロイ設定（design §4.7「環境」）
+#
+# 環境ごとに config_env を分ける:
+#   dev    … 共有 dev 環境。更新は main マージ後の CD（deploy-dev.yml）経由のみ
+#   dryrun … 使い捨て検証スタック。人間が対話で deploy → 疎通確認 → sam delete する
+#   prod   … T031 で追加（独自ドメイン・ACM を含む）
+#
+# 通知先メールアドレス等の環境固有値はここに書かない（OSS 公開リポジトリ）。
+# デプロイ時に --parameter-overrides AlertEmail=... で注入する。
+version = 0.1
+
+[dev.global.parameters]
+stack_name = "oriorimap-dev"
+
+[dev.build.parameters]
+cached = true
+parallel = true
+
+[dev.deploy.parameters]
+region = "ap-northeast-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = "CreateBudget=true"
+
+[dryrun.global.parameters]
+stack_name = "oriorimap-dryrun"
+
+[dryrun.build.parameters]
+cached = true
+parallel = true
+
+[dryrun.deploy.parameters]
+region = "ap-northeast-1"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+# dry-run では Budgets も含めた全リソースを実際に作って検証する
+parameter_overrides = "CreateBudget=true"
+
+[dryrun.delete.parameters]
+region = "ap-northeast-1"
+no_prompts = true

@@ -23,7 +23,7 @@ graph LR
     S3F["S3: SPA静的アセット"]
     S3M["S3: メディア<br/>(アイコン・写真)"]
     APIGW["API Gateway<br/>HTTP API<br/>+ JWT Authorizer"]
-    L["Lambda (nodejs22.x)<br/>Hono + Powertools"]
+    L["Lambda (nodejs24.x)<br/>Hono + Powertools"]
     DDB[("DynamoDB<br/>シングルテーブル")]
     COG["Cognito User Pool<br/>(Liteティア)"]
     SCH["EventBridge Scheduler<br/>(日次)"]
@@ -69,7 +69,7 @@ graph LR
 | フロントホスティング | S3 + CloudFront + GitHub Actions（CI/CD） | **逸脱**（P1既定はAmplify Hosting） | (1) 転送料金: CloudFrontは**常時無料枠1TB/月**に対し、Amplify Hostingは$0.15/GB（無料枠15GB/月・12ヶ月限定）で転送量が伸びた場合に不利 (2) `/api/*`・`/embed/*`をAPI Gatewayへ振り分ける単一ドメイン構成（§2）にはCloudFrontのビヘイビア・キャッシュ制御が必要（AmplifyもCloudFrontベースだが細かなビヘイビア制御に制約） (3) Amplifyの主な利点であるCI/CDは、OSS公開リポジトリのため**GitHub Actions（公開リポは無料）+ SAMデプロイ**で代替できる |
 | 地図ライブラリ             | Geolonia JS API（MapLibre GL JS互換）                                                                                                                                                          | カタログ外（要件で確定）                          | ユーザー指示。MapLibre同一シグネチャで `addImage`/Symbolレイヤー/Marker/GeolocateControl が利用可（\_research.md §6-2）                                                                                                                                                                  |
 | カスタムアイコン描画       | 閲覧・embed = Symbolレイヤー + `addImage` / 編集UI = HTML Marker のハイブリッド                                                                                                                | カタログ外                                        | 閲覧は将来数千スポットまで実用（DOM Markerは数百件で劣化）。編集は同時数件でドラッグ・ポップアップが1行のMarkerが生産性で勝る（\_research.md §6-1）                                                                                                                                      |
-| API                        | API Gateway **HTTP API** + JWT Authorizer + Lambda nodejs22.x + Hono（`hono/aws-lambda`）+ Powertools for AWS Lambda (TS) + SAM esbuild(ESM)                                                   | 準拠（P2-Node既定）                               | JWT検証はAPI Gatewayネイティブ機能でLambda Authorizer不要（\_research.md §9-3）                                                                                                                                                                                                          |
+| API                        | API Gateway **HTTP API** + JWT Authorizer + Lambda **nodejs24.x** + Hono（`hono/aws-lambda`）+ Powertools for AWS Lambda (TS) + SAM esbuild(ESM)                                                   | 準拠（P2-Node既定）                               | JWT検証はAPI Gatewayネイティブ機能でLambda Authorizer不要（\_research.md §9-3）。**ランタイムは 2026-08-11 に nodejs22.x から nodejs24.x へ更新**（T002実装時・ユーザー判断）: 22 はサポート期限が2027年4月頃で更新頻度が高い。24 はGA・LTSで**2028年4月**まで、全リージョン提供・Powertools (TS) 対応済み。最新の `nodejs26.x` は **preview** で AWS が本番ワークロード非推奨とし実行ログに警告を出すため不採用（GA後に移行。§10）                                                                                                                                                                                                          |
 | DB                         | DynamoDB（シングルテーブル + GSI×2、オンデマンド）                                                                                                                                             | 準拠（P2既定）                                    | 読み取り中心・少量書き込みでアイドル時ゼロ課金。**本サービスのアクセスパターンに空間クエリが存在しない**ことが採用の核（§3.2の比較検討参照）。§6参照                                                                                                                                     |
 | 検索・ソート（R3.1, R3.2） | GSI1（公開一覧）を全件Queryし**Lambda内で部分一致フィルタとソート**（`sort=created\|updated` いずれもLambda内。GSIの物理順はupdatedAtのみ）                                                    | 準拠の範囲内                                      | 公開地図は数百件規模の想定でメタデータ全件が1〜数MB・1回のQueryに収まるため、フィルタ・ソートともLambda内で完結させる（created用GSIは追加しない）。この前提は公開コンテンツ合計1,000件までとし、超過時の移行方針を§10に記載。OpenSearch等の検索基盤はコスト（月$25〜）が規模に対して過剰 |
 | 認証                       | Cognito User Pool（**Liteティア明示指定**）+ メール/パスワード + Google IdP + Hosted UI（Authorization Code + PKCE）                                                                           | 準拠（AWSマネージド優先）                         | 無料枠10,000 MAU・パスワード非保持・R1.7のロックアウトも標準機能。パスワードレス等の上位機能は不要でLiteが最大73%安い（\_research.md §9-1）                                                                                                                                              |
@@ -382,6 +382,7 @@ oriorimap/
 | 空間クエリ要件（現在地周辺検索・bbox横断検索等）が生じた場合のDB拡張（geohash GSI追加 or PostGIS系移行。§3.0） | 運用後（要件発生時） |
 | ownerName非正規化コピーの更新方針（表示名変更頻度が高い場合の再同期バッチ）                              | 運用後                                                                   |
 | 管理者アカウントのシード手順（Cognitoグループ付与のrunbook）                                             | 環境構築タスクで文書化                                                   |
+| Lambdaランタイムの `nodejs26.x` への移行（現在は preview のため不採用。§3「API」行）。移行は `template.yaml` の `Globals.Function.Runtime` 1行 + Powertools/型定義の対応確認 | Node.js 26 の Lambda ランタイムが GA になった時点（Node 26 の LTS 化＝2026年10月以降の見込み）。遅くとも nodejs24.x のサポート期限（2028年4月）前 |
 
 ## 11.その他(質問・要望事項)
 
