@@ -17,6 +17,7 @@ dist/
 build/
 coverage/
 .vite/
+*.tsbuildinfo
 
 # --- AWS SAM ---
 .aws-sam/
