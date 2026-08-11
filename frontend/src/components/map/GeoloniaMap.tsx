@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { GeoloniaMap as GeoloniaMapSDK } from '@geolonia/embed/core';
+import { GeoloniaMap as GeoloniaMapSDK, keyring } from '@geolonia/embed/core';
 import type { Map as MaplibreMap } from 'maplibre-gl';
 
 export const JAPAN_CENTER: [number, number] = [138.5, 37.0];
@@ -33,15 +33,16 @@ export function GeoloniaMap({
       return;
     }
 
-    const apiKey = import.meta.env.VITE_GEOLONIA_API_KEY;
+    // @geolonia/embed/core の実APIはコンストラクタオプションのapiKeyを無視するため、
+    // 生成前にkeyring.apiKeyへ設定する必要がある（node_modules/@geolonia/embed/README.md）
+    keyring.apiKey = import.meta.env.VITE_GEOLONIA_API_KEY;
     const mapOptions = {
       container,
-      apiKey,
       center: initialCenter,
       zoom: initialZoom,
     };
     const instance = new GeoloniaMapSDK(mapOptions);
-    setMap(instance as unknown as MaplibreMap);
+    setMap(instance);
 
     return () => {
       instance.remove();

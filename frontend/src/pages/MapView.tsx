@@ -4,13 +4,12 @@ import { GeolocateButton } from '@/components/map/GeolocateButton';
 import { LegendCard } from '@/components/map/LegendCard';
 
 // TODO: 実データ取得は後続タスクで実装する。ここでは3点のサンプルGeoJSONで動作を示す
-const PIN_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
-  '<path fill="#614C9B" d="M16 2c-6.6 0-12 5.4-12 12 0 9 12 16 12 16s12-7 12-16c0-6.6-5.4-12-12-12z"/>' +
-  '<circle cx="16" cy="14" r="5" fill="#FFFFFF"/></svg>';
-
+// アイコンはPNG（MapLibreのcreateImageBitmapベースのloadImageはSVGデコードに非対応なため）
 const SAMPLE_ICONS: SpotIcon[] = [
-  { id: 'pin', url: `data:image/svg+xml,${encodeURIComponent(PIN_SVG)}` },
+  {
+    id: 'pin',
+    url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAADfUlEQVR4AdRVS0hUURj+z1UnNaKoFgZSkQsJ0QTbtIsQHWeMSlMXhc6kM0IgtCh640Zc9qA23pFmRCpD6eUrVCKqXViYEbqoRYWGJlhZhOI9/f+dh8M95815KESX+9/zn+///u9859x5KPCPr//LQH1p+2ZXuepxOdU+d7lvAuNHKCZ0zNHe4C1u25jIocZ1AsfKfNm4sLqcxqcZMJUx5sRFcjE2hCJXxxTuW0xXZtxOXxv1YC3mHdOA2+E7ZEvhk7iwhwHYYinqHAZe6nE5fRWx+JYG3OXqec7gAQDLhIQvvafH5VTPWrWaGqhzqJXY2MIYMByTuqkXo9XlbK8yE5AaqLX7CpgCnQD4hNVeqMG0DpdDLZQpSQ2kpMIFBixD1pAMRlpMYedkvYKBurK2HCTWYJje+UXZ0HztMNzsqtWDcsJMG4KFmpB2cBZ6CgYYU0zfF+4CKmv3wqlmO+zI2QqZ6216UE7YkeNF+NJYSFocmKIcNKKCAVCg2EgKz3PzssBZVQhMsgZh5Vjbnb8tTBdGbLMbQcEAkrKNpPDccXRPOJWOdEL2igJpTQcZ7ATDJRgAzrMMnMh0+64tkdwsseRItEUDAOlm4muAC9oSA2zWbKFPH+fMShHcmiNqSwzAaETNkDy5/xa4xg3oypRqAz1jK4CYCdqCAQ2gV+wLIu/HpmAQTQRn4vPxvTcwMT4tFkKITFs0sLSuC/k/MaR3T8cruHSyB54PTcLczIIelBP26M5raQ+BeG7z6xTtLuXRIRjoHKr9heQr0SRjPvV5HgI3XsCZ+i49KCfMyDPMr6u9jb8NGP7sGBGc2/5oVwH4N0zX5MYNzQU1RTnhBIiijjR+B66cpnwtgmnQpGtKxKQGiOfvb+jgnLdRvpogDf+AR3j3YU1TA0SwfeVNnMMw5UkF5yOkYdVraUAdbVyCtNRq3MW4lYi0xuEdT0ur0jWkhCBoaYAogYfu+SWNOdDEB5rHE8Rd1KCMemPxYxoggduDni9MS92H34yXNLcK/MQ/Iy71WPHCtbgMENk/eGJ2IWPTfjRxGRdZJiw6CMPPy8VAX8MB4kbXrPK4DZBId3f1sr/P26JwbgcOK39amLNlKAn0e1oBGHqBuK+EDIRVb/V7R0BLyePAh3DXw5T7Bz1Pw/VExqQM0AJ0zIE+bynuuoRywpKJpA3Eu1gs3l8AAAD//3JIdAUAAAAGSURBVAMATzAnUODQJQQAAAAASUVORK5CYII=',
+  },
 ];
 
 const SAMPLE_SPOTS: SpotMarker[] = [

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { GeoloniaMap, useGeoloniaMap } from './GeoloniaMap';
 
-const { mapInstance, GeoloniaMapCtor } = vi.hoisted(() => {
+const { mapInstance, GeoloniaMapCtor, keyring } = vi.hoisted(() => {
   const mapInstance = {
     on: vi.fn(),
     once: vi.fn(),
@@ -19,17 +19,19 @@ const { mapInstance, GeoloniaMapCtor } = vi.hoisted(() => {
     isStyleLoaded: vi.fn(() => true),
     remove: vi.fn(),
   };
+  const keyring = { apiKey: '' };
   return {
     mapInstance,
     GeoloniaMapCtor: vi.fn(function () {
       return mapInstance;
     }),
+    keyring,
   };
 });
 
 vi.mock('@geolonia/embed/core', () => ({
   GeoloniaMap: GeoloniaMapCtor,
-  keyring: { setApiKey: vi.fn() },
+  keyring,
 }));
 
 function MapConsumer() {
@@ -40,6 +42,7 @@ function MapConsumer() {
 describe('GeoloniaMap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    keyring.apiKey = '';
   });
 
   it('renders a container element with data-testid="geolonia-map-container"', () => {
@@ -68,10 +71,14 @@ describe('GeoloniaMap', () => {
     expect(GeoloniaMapCtor).toHaveBeenCalledTimes(1);
     expect(GeoloniaMapCtor).toHaveBeenCalledWith({
       container,
-      apiKey: import.meta.env.VITE_GEOLONIA_API_KEY,
       center: [138.5, 37.0],
       zoom: 4.5,
     });
+  });
+
+  it('sets keyring.apiKey from VITE_GEOLONIA_API_KEY before constructing the map (@geolonia/embed/core の実APIはコンストラクタオプションのapiKeyを無視するため)', () => {
+    render(<GeoloniaMap />);
+    expect(keyring.apiKey).toBe(import.meta.env.VITE_GEOLONIA_API_KEY);
   });
 
   it('never passes attributionControl: false (帰属表記の受入条件・決定ログ#29-1)', () => {
