@@ -45,7 +45,8 @@
 
 - **デプロイ先アカウントはローカル profile `smb-infra` に固定**（design §4.7）。`samconfig.toml` の全 config_env に `profile` を明記済み。`sam` / `aws` を素で叩くと環境の既定プロファイル（別アカウント）へ流れるため、**アカウントを跨ぐ確認コマンドでは必ず `--profile smb-infra` を付ける**
 - IaC: SAM（template.yaml）。リソース変更は必ずtemplate経由。コンソール手作業やad-hocなAWS CLI変更は禁止
-- デプロイフロー: iac-workflow スキルに従う（cfn-lint検証 → changeset確認 → デプロイ）。dev環境の更新はmainマージ後のCD（deploy-dev.yml）経由のみ
+- デプロイフロー: iac-workflow スキルに従う（cfn-lint検証 → changeset確認 → デプロイ）
+- **dev 環境の単一ライター（2026-08-12 改訂・実行モードで変わる）**: **microvm 直列運用**では VM 内エージェントが ChangeSet を作り mvm-gate（cfn-guard）が合格分を自動執行して dev を更新する――単一ワーカーなので競合が起きない。**host の並列運用**に戻す場合は、複数エージェントが dev を奪い合うため各自が dev を直接変更してはならず、別途 CD 経路を設ける必要がある。いずれのモードでも **prod は人間が明示的にデプロイ**する（自動デプロイ経路なし）。design §4.7 参照
 - Lambda (Node.js 24.x / TypeScript):
   - ビルドは SAM の `BuildMethod: esbuild`（`Format: esm`・`OutExtension: .js=.mjs`・`Target: es2022`）。tsc は型チェック専用（`noEmit`）
   - **`sam build` / `sam local start-api` は必ず npm 経由で呼ぶ**（`npm run sam:build` / `npm run sam:local`）。esbuild は npm workspaces でルートへ巻き上げられ `backend/node_modules` に無いため、素の `sam build` は `Cannot find esbuild` で失敗する。npm script 経由なら `node_modules/.bin` が PATH に載って解決する（CI も `npm ci` 後に npm script で呼ぶこと）
