@@ -17,7 +17,7 @@ describe('app', () => {
   it('未定義ルートは404・code:NOT_FOUNDを返す', async () => {
     const res = await app.request('/api/__does-not-exist__');
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as { code: string; message: string };
     expect(body.code).toBe('NOT_FOUND');
   });
 });

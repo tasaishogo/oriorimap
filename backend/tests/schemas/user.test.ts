@@ -27,4 +27,9 @@ describe('userSchema', () => {
     const result = userSchema.safeParse({ ...validUser, status: 'banned' });
     expect(result.success).toBe(false);
   });
+
+  it('pending_delete状態でdeleteRequestedAtが無い場合は失敗する（design §6の不変条件）', () => {
+    const result = userSchema.safeParse({ ...validUser, status: 'pending_delete' });
+    expect(result.success).toBe(false);
+  });
 });
