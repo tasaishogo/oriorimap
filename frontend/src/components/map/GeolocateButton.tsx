@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { GeolocateControl } from 'maplibre-gl';
 import { LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,6 @@ export type GeolocateButtonProps = {
 export function GeolocateButton({ className }: GeolocateButtonProps) {
   const map = useGeoloniaMap();
   const controlRef = useRef<GeolocateControl | null>(null);
-  const [, setHasError] = useState(false);
 
   useEffect(() => {
     if (!map) {
@@ -25,8 +24,7 @@ export function GeolocateButton({ className }: GeolocateButtonProps) {
     });
 
     const handleError = (_event: GeolocationPositionError) => {
-      // R4.8: 位置情報の拒否・取得失敗時もUIをブロックせず通常表示を継続する
-      setHasError(true);
+      // R4.8: 位置情報の拒否・取得失敗時もUIをブロックせず通常表示を継続する（no-op）
     };
 
     control.on('error', handleError);

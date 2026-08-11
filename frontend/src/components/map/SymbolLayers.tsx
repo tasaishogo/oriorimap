@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Map as MaplibreMap, GeoJSONSource } from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
-import { useGeoloniaMap } from './GeoloniaMap';
+import { useGeoloniaMap, JAPAN_CENTER, JAPAN_ZOOM } from './GeoloniaMap';
 
 export type SpotIcon = { id: string; url: string };
 export type SpotMarker = { id: string; lng: number; lat: number; iconId: string; name?: string };
@@ -51,6 +51,7 @@ export function SymbolLayers({
   layerId = 'spots-symbol',
 }: SymbolLayersProps) {
   const map = useGeoloniaMap();
+  const hadSpotsRef = useRef(false);
 
   useEffect(() => {
     if (!map) {
@@ -64,11 +65,19 @@ export function SymbolLayers({
           return;
         }
         if (!map.hasImage(icon.id)) {
-          const { data } = await map.loadImage(icon.url);
-          if (cancelled) {
-            return;
+          try {
+            const { data } = await map.loadImage(icon.url);
+            if (cancelled) {
+              return;
+            }
+            map.addImage(icon.id, data);
+          } catch (error) {
+            if (cancelled) {
+              return;
+            }
+            // 1件のアイコン読み込み失敗で残りのスポット表示まで巻き込まない（他アイコン・ソース/レイヤー作成・fitToSpotsは継続する）
+            console.error(`SymbolLayers: failed to load icon "${icon.id}"`, error);
           }
-          map.addImage(icon.id, data);
         }
       }
       if (cancelled) {
@@ -94,6 +103,11 @@ export function SymbolLayers({
       }
 
       fitToSpots(map, spots);
+      if (spots.length === 0 && hadSpotsRef.current) {
+        // R2.10: スポットが1件以上→0件に変化した時だけ日本全体表示に戻す（初回マウント時の0件は対象外）
+        map.easeTo({ center: JAPAN_CENTER, zoom: JAPAN_ZOOM, duration: 0 });
+      }
+      hadSpotsRef.current = spots.length > 0;
     };
 
     if (map.isStyleLoaded()) {

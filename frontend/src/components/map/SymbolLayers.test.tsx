@@ -211,6 +211,31 @@ describe('SymbolLayers', () => {
       ],
     });
   });
+
+  it('eases back to the Japan-wide view when spots change from 1+ to 0 (R2.10)', async () => {
+    const initialSpots: SpotMarker[] = [{ id: 's1', lng: 139.767, lat: 35.681, iconId: 'a' }];
+    const { rerender } = render(
+      <GeoloniaMap>
+        <SymbolLayers spots={initialSpots} icons={[]} />
+      </GeoloniaMap>,
+    );
+
+    await waitFor(() => expect(mapInstance.addSource).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <GeoloniaMap>
+        <SymbolLayers spots={[]} icons={[]} />
+      </GeoloniaMap>,
+    );
+
+    await waitFor(() =>
+      expect(mapInstance.easeTo).toHaveBeenCalledWith({
+        center: [138.5, 37.0],
+        zoom: 4.5,
+        duration: 0,
+      }),
+    );
+  });
 });
 
 describe('fitToSpots (pure function, R2.10 spot-count branches)', () => {
