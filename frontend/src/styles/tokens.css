@@ -1,5 +1,10 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/* 次の @theme ブロックは design §5.2「藤重」の契約値そのもので、
+   tokens.test.ts が設計書の表記（大文字16進）と生テキストで照合する。
+   Prettier は16進を小文字化するためこのブロックだけ整形対象から外す
+   （docs/spec/ を .prettierignore で除外しているのと同じ趣旨）。 */
+/* prettier-ignore */
 @theme {
   --color-primary: #614C9B;
   --color-primary-dark: #463672;
