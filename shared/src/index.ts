@@ -1,3 +1,3 @@
 // @oriorimap/shared — フロント・バックエンド共有のZodスキーマ・定数の単一ソース
-// スキーマ実装は T006（バックエンド骨格）で追加される
-export {};
+export * from '../schemas/index.js';
+export * from '../constants.js';
