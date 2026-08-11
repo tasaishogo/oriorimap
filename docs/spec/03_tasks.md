@@ -24,7 +24,29 @@
   - **host**: 在席またはRemote Control接続時。対話が要る波・人間ステップ内包タスク（T031/T032）・IaC対話実行向き。「気づく」= notify.sh（`SLACK_WEBHOOK_URL`設定時）またはPushNotification、「応える」= Remote Control。無人ラン中はMacのスリープを無効化（caffeinate等）
   - **microvm**: 発射後非接続でよい波（アプリスライス群）向き。`tools/proj start oriorimap --tasks docs/spec/03_tasks.md`。**注意**: 進行監視はpull型（`proj status`/`proj report`。汎用のpush通知・Remote Controlは不可）/ 直列実行 / R2 codexクロスレビュー不可（R1+3レンズ縮退が報告に明記される）/ IaCタスクは**mvm-gate Lambda（cfn-guard）が合格ChangeSetを自動執行**し、違反時のみntfyでスマホへpush通知→人間が`proj approve`（mvm-poc Phase 2・2026-08-01実装。VM内エージェントは実行権を恒久に持たない）
   - **デプロイ先AWSアカウント（2026-08-11 確定）**: ローカル profile **`smb-infra`**（同アカウントには同パターンの先行プロジェクト simple-cms が稼働。Google OAuth の SSM パラメータもここ）。`samconfig.toml` の全 config_env に `profile` を明記済み――未指定だと環境の既定プロファイルへ流れる（T002/T003 の dry-run で実際に別アカウントへ向けてしまった。いずれも撤去済み・残置ゼロ確認済み）。design §4.7 参照
-  - **microvm の払い出しはアカウント違いのためやり直しが必要（2026-08-11 判明）**: 既存の `mvm-vend-oriorimap`（実行ロール・cfn-guard ゲート）は**別アカウント側**にあり、アプリを `smb-infra` へデプロイする本構成では VM 内エージェントから届かない。Phase C を microvm で回す前に (1) `smb-infra` へ mvm 共通基盤 `infra/vend-base.yaml` を人間レビューの下で1回デプロイ → (2) `tools/proj vend oriorimap` を `smb-infra` でやり直し → (3) 旧払い出しを `tools/proj retire` → (4) Geolonia APIキーの VM への注入経路（SSM）を用意 → (5) Phase C の Done条件を機械検証可能な形へ改訂（現状の「dev環境で〜手動確認」は VM で verify できない）。guardルールのリソース型allowlistへの Cognito 5型+Budgets 追記は再 vend 時に再適用する
+  - ~~**microvm の払い出しはアカウント違いのためやり直しが必要（2026-08-11 判明）**~~ → **解消（2026-08-12）**: mvm-poc セッションが smb-infra へ host モードで払い出しを実施し、当方で実測確認済み。実行ロール `mvm-proj-oriorimap` / CFn サービスロール `mvm-proj-oriorimap-cfn`（いずれも `mvm-boundary` 付き）/ artifacts バケット `oriorimap-sam-artifacts-820315588078`（PAB 全ON）/ guard=whitelist・protected=["oriorimap-dev","oriorimap-prod"]・eph-ttl 4h / trust=ローカル SSO ロール＋hub の同名ロール（将来の microvm 用に先付け）。`mvm-vend-oriorimap` は CREATE_COMPLETE。**CloudFront Function の guard 許可も hub・smb-infra 両方の gate に反映済み**で、本経路 E2E（local SSO → assume → `AWS::CloudFront::Function` を含む ChangeSet → gate `/execute` → executed → `/delete` 回収）で実証されている。なお **microvm（発射後非接続）にするには追加で hub 側 vend と R1b、および autopilot への targets 注入結線（mvm-poc 残件#16・実装中）が要る**。host モードは上記の払い出しだけで動く
+  - **★T005-b の事前確認（2026-08-12・未検証事項あり）**: gate は Processed テンプレート全体を whitelist で評価するため、初回実行の前に **`tools/proj gate oriorimap oriorimap-dev <changeset> --dry-run` で必ず判定を先取りする**（mvm-poc 助言）。判明済みの論点:
+    - `10-iam-role.guard` は**全 `AWS::IAM::Role` に `PermissionsBoundary` を要求**する。本テンプレートの IAM ロールは SAM 自動生成のため既定では boundary が付かず、そのままでは弾かれる（かつ CFn サービスロール側の boundary Deny で実デプロイも失敗する）。→ `Globals.Function.PermissionsBoundary` をパラメータ `UseMvmBoundary`（既定 true）付きで追加済み
+    - **未検証**: `ScheduleV2` イベントから SAM が生成するスケジューラ用ロール（`CleanupFunctionDailyRole`）に、Function 側の `PermissionsBoundary` が波及するかは未確認。波及しない場合は当該ロールを自前定義して boundary を付けるか、`ScheduleV2` の `RoleArn` に自前ロールを渡す必要がある。**`--dry-run` の結果で確定させること**
+    - 初回は `--change-set-type CREATE`（既存スタックがあれば UPDATE）
+  - **host モードでの IaC 実行手順（2026-08-12・gate 経由。OIDC ロールは使わない）**:
+    1. `AWS_PROFILE=smb-infra` でローカル SSO から `mvm-proj-oriorimap` を assume（trust 登録済み）
+    2. `npm run sam:build` → ChangeSet 作成。`--s3-bucket oriorimap-sam-artifacts-820315588078` と **`--role-arn arn:aws:iam::820315588078:role/mvm-proj-oriorimap-cfn`** を指定（サービスロールのスティッキー参照を最初から正しく設定する）
+    3. `tools/proj gate oriorimap <stack> <changeset>` で cfn-guard 判定＋実行（`projects.json` 登録済みで smb-infra へ自動ルーティング）
+    4. 削除は `tools/proj delete-stack oriorimap <stack>`
+  - **verify スクリプトの assume ガード（host / microvm 両対応。2026-08-12・mvm-poc 提供）**: `mvm-target-env` は VM イメージにのみ存在しローカルには無いため、次のガードで同じスクリプトが両環境で動く。VM 内では hub ロールから spoke ロールへ降格し、ローカルでは素通しして SSO の ambient 資格情報で smb-infra に届く。一時クレデンシャルは3600秒有効なので、verify が1時間を超える場合は AWS 検証パートを後段に置くか直前で assume し直す
+
+    ```bash
+    if command -v mvm-target-env >/dev/null 2>&1 && [ -f /etc/mvm/targets.json ]; then
+      eval "$(mvm-target-env oriorimap)"
+    fi
+    ```
+  - **microvm 投入前に必須: Phase C の Done条件を「1コードスパン」形式へ改訂する（2026-08-12 追記・mvm-poc セッションと相互確認済み）**: `tools/tasks-to-queue.mjs` の `deriveVerify` は Done条件から機械 verify を次の規則で取り出す――(1) Done条件そのものがコマンドとして読めれば literal 採用 / (2) **インラインコード（バッククォート）がちょうど1個**でコマンドとして読めればそれを採用 / (3) それ以外は null。**`looksLikeCommand` は CJK が混じると false を返す**ため、日本語混じりの Done条件は必ず (2) の判定に落ちる。現状の Phase C の書き方（例: 「`npm test -w backend`（maps系）が通り、dev環境で 作成→公開切替 を手動確認。非公開地図は404」）は**コードスパン1個＋散文**なので、**verify として `npm test -w backend` だけが採用され、本命の dev 環境検証が黙って落ちる**（機械判定は緑なのに実質未検証）。改訂の書式は以下。
+    - **1タスク＝コードスパン厳密に1個**。検証コマンド以外をバッククォートで囲まない（スタック名や 404 などもバッククォート禁止。2個以上あると `ambiguous-multiple-code-spans` で verify=null になる）
+    - 形は「Done条件: 」＋1コードスパン＋「（内容: …）」の括弧内散文。日本語ゼロの純コマンドにすれば literal 判定になるが、可読性から 1スパン＋括弧散文を推奨（mvm-poc 側の推奨も同じ）
+    - 検証が複数ある場合は **1本のスクリプト（`scripts/verify/T0xx.sh`）へ集約**してコードスパンを1個に保つ
+    - **verify スクリプトが dev（smb-infra）の AWS を叩く場合、冒頭で mvm-target-env による spoke ロールの assume を行う**――VM 本来の hub ロールでは smb-infra を触れない。ユニットテスト部分は assume 不要。#16 で autopilot がタスクプロンプトへ自動注入する規約と同じだが、**verify スクリプト自身にも前処理が要る**
+    - この改訂は **microvm 固有の準備**である。host モードで回す場合は autopilot の recipe と PM ランブックが検証を担うため不要
   - **effect-plane（`*-eph-deployer` / `*-eph-tester` / `eph-env.yml`）は設置しない（2026-08-11 決定）**: IaC の実行経路は mvm-gate Lambda（cfn-guard）に一元化する。2系統持つと guard ルールの二重管理になるため。ただし T005 の CD 用 OIDC ロール（`DEV_DEPLOY_ROLE_ARN`）は別目的（人間が承認済み＝mainマージ済みの変更を dev へ反映する信頼された経路）であり、採否は T005 着手時に確定する
 - 【人間】タスク（T008, T010, T011, T030, T039）は**どちらのモードでも無人キューに投入しない**。各波の投入前に、その波が依存する【人間】タスクを先に完了させる
 - 具体的な先行実施の目安: ~~T008（Geoloniaキー発行）~~**完了(2026-08-11)**・T010（Google OAuth）・~~T011（問い合わせ送付）~~**不要につきクローズ(2026-08-11)**。T039（devドメイン登録）はT005完了直後。T030（Cloudflare DNS）はT031着手前
@@ -62,7 +84,7 @@
   - _Requirements: 全画面・embed要件共通_
 
 - [ ] T005 [serial] CI（GitHub Actions）と共有dev環境の初回構築・疎通（Wave 0）
-  - **2026-08-12 改訂（OIDC ロールを作らない設計に変更）**: 当初の「CI/CD + OIDC フェデレーション」から **CD ごと廃止**し、dev の更新経路を **mvm-gate Lambda（cfn-guard）に一元化**した。理由: gate は Function URL が `AuthType=AWS_IAM` で呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため **GitHub Actions からは呼べず**（CD 専用ロールを作っても403）、かつ `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外――CD を残すと OIDC ロールに CFn 書き込みとデータプレーンの両方の権限が必要になり、IaC 実行経路が2系統になる。詳細は design §4.7「デプロイ経路」
+  - **2026-08-12 改訂（実装期は OIDC ロールを作らない）**: 当初の「CI/CD + OIDC フェデレーション」から、**実装期（Phase C・microvm 稼働中）は CD を持たず** dev の更新経路を **mvm-gate Lambda（cfn-guard）に一元化**する形に変更した。**恒久的に CD を持たないのではない**――初期構築が完了して波が常時回らなくなる運用期には CD を導入する（design §4.7「デプロイ経路」の【運用期】。導入は T034 の範囲）。理由: gate は Function URL が `AuthType=AWS_IAM` で呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため **GitHub Actions からは呼べず**（CD 専用ロールを作っても403）、かつ `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外――CD を残すと OIDC ロールに CFn 書き込みとデータプレーンの両方の権限が必要になり、IaC 実行経路が2系統になる。詳細は design §4.7「デプロイ経路」
   - 対象: `.github/workflows/pipeline-gates.yml`（**build ジョブを追加**）、`.github/workflows/deploy-dev.yml`（**削除**）。template.yaml の変更なし（OIDC 用 IAM ロールは作らない）
   - **ci.yml は新規作成しない（2026-08-12 判明）**: bootstrap が設置した `pipeline-gates.yml` のヘッダーに「対応: docs/spec/02_design.md §4.7（ci.yml 相当）」と明記されており、lint / 型チェック / format / 単体テスト / 結合 / mutation は既に PR トリガーで実行されている。**欠けているのは `sam validate` とビルド可能性の検証だけ**なので、新規ファイルを作らず同ファイルに `build` ジョブを足す（重複した CI 実行と重複したシグナルを避ける）
   - 内容: `pipeline-gates.yml` に `build` ジョブ（`npm ci` → `npm run sam:validate` → `npm run sam:build` → `npm run build -w frontend`。**AWS 認証情報は不要**）を追加し、bootstrap 設置の deploy-dev.yml を削除する。あわせて dev スタック（`oriorimap-dev`）を初回構築する
@@ -268,7 +290,7 @@
 
 - [ ] T031 [serial] 独自ドメイン（oriorimap.kiryu.tech）・ACMのIaC組み込みとprod初期デプロイ
   - 対象: template.yaml, samconfig.toml（prod）
-  - 内容: ACM証明書（us-east-1・DNS検証）とCloudFrontエイリアス `oriorimap.kiryu.tech` をテンプレートへ追加し、prodスタックを初期デプロイ（health-only疎通）。証明書作成後に検証CNAMEの値を出力してT030（人間のCloudflare登録）を依頼し、ISSUEDを待って続行する。Route 53は使用しない（DNSはCloudflare管理・design §3）
+  - 内容: ACM証明書（us-east-1・DNS検証）とCloudFrontエイリアス `oriorimap.kiryu.tech` をテンプレートへ追加し、prodスタックを初期デプロイ（health-only疎通）。**prod スタックには `--role-arn mvm-proj-oriorimap-cfn` を付けない**（2026-08-12 追記）――prod は gate を通さず人間が明示デプロイする設計（design §4.7）であり、付けると `proj retire` の F19 ガードの制約を prod まで背負い込むため。dev だけが microvm に紐づく形にする。証明書作成後に検証CNAMEの値を出力してT030（人間のCloudflare登録）を依頼し、ISSUEDを待って続行する。Route 53は使用しない（DNSはCloudflare管理・design §3）
   - Done条件: `curl https://oriorimap.kiryu.tech/api/health` が200、`https://oriorimap.kiryu.tech/` が200でSPAを配信する（health-only。地図表示を含む本番動作確認はT034で実施し、機能スライスへの依存は持たない）
   - 依存: T030, T005
   - _Requirements: §4非機能（本番環境）_
@@ -288,6 +310,7 @@
 - [ ] T034 運用仕上げ: runbook・復元テスト・アラート確認
   - 対象: README.md（運用手順書）, docs/
   - 内容: Geolonia表示回数ルーチン（design §4.8）・DynamoDB PITR/S3バージョニングからの復元手順・管理者シード手順をrunbook化し、devで復元テストを1回実施。Budgets/Alarmの通知先を確認。本番ドメインでの動作確認（地図トップ表示・Geolonia地図ロード）を実施
+  - **運用期への移行（2026-08-12 追加）**: 初期構築が完了し microvm の波が常時回らなくなるため、**dev 向け CD（GitHub Actions + OIDC ロール1本）を導入**して dev の書き手を「main へのマージ」に戻す（design §4.7【運用期】）。gate 経路は休眠させる（削除しない）。**`proj retire` は行わない**――F19 ガード（`mvm-proj-oriorimap-cfn` を参照するスタックがある間は retire 拒否）に抵触し dev を捨てることになるうえ、vend スタックの中身は呼ばれなければ実質 $0 で残す害がない
   - Done条件: PITRからの復元テストが成功し手順どおり文書化されている。Budgetsのテスト通知が届く。`https://<本番ドメイン>/` で地図トップが表示されGeolonia地図がロードされる
   - 依存: T029, T031, T022
   - _Requirements: §4可用性・運用・コスト_
