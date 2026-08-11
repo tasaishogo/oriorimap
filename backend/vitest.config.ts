@@ -7,6 +7,13 @@
 // worktreeルート直下の ctrf/ctrf-report.json に合わせる（TASK CARD の CTRF パス）。
 // `npm test -w backend` はこのファイルのある backend/ を cwd として実行されるため、
 // 相対パスは 1 階層上（worktreeルート）を指す `../ctrf` にする。
+//
+// レポーターパッケージ: `vitest-ctrf-json-reporter`(0.0.3。スキル references/verification-recipes.md
+// が参照する既定パッケージ)はレガシーな `onFinished` フックのみを実装しており、
+// Vitest 4.x はカスタムレポーターに対して新フック `onTestRunEnd` しか呼ばないため
+// 無音で report.json が生成されない（実機確認済み・2026-08-12）。
+// Vitest 4 対応版の `@d2t/vitest-ctrf-json-reporter`(1.3.0. `onTestRunEnd`実装済み・
+// 既定の出力パスも同じ ctrf/ctrf-report.json でCTRFスキーマ形状も同一)を採用する。
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -15,7 +22,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     reporters: [
       'default',
-      ['vitest-ctrf-json-reporter', { outputDir: '../ctrf', outputFile: 'ctrf-report.json' }],
+      ['@d2t/vitest-ctrf-json-reporter', { outputDir: '../ctrf', outputFile: 'ctrf-report.json' }],
     ],
   },
 });
