@@ -1,0 +1,35 @@
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+*.log
+
+# --- env / secrets（OSS公開予定のため厳格に）---
+.env
+.env.*
+!.env.example
+
+# --- build outputs ---
+dist/
+build/
+coverage/
+.vite/
+
+# --- AWS SAM ---
+.aws-sam/
+
+# --- テスト成果物 ---
+playwright-report/
+test-results/
+
+# --- Claude Code / エージェント運用のローカル状態 ---
+.claude/settings.local.json
+.agent-tasks/runs/
+.agent-tasks/notifications.jsonl
+
+# --- クロスレビューの一時ファイル（意見書・裁定記録・プロンプトは追跡する）---
+docs/spec/reviews/.codex-events-*.jsonl
+docs/spec/reviews/.session-*
