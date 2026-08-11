@@ -1,0 +1,368 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  OriOriMap — データ・API基盤（T002）。DynamoDB シングルテーブル / S3×2 /
+  HTTP API / Lambda（api・cleanup）/ EventBridge Scheduler / 監視（Alarm・Budgets）。
+  Cognito+JWT Authorizer は T003、CloudFront は T004 で追加する。
+  正本: docs/spec/02_design.md §2・§3・§4.5・§6
+
+# ---------------------------------------------------------------------------
+# ビルドの前提
+#   Lambda は SAM の BuildMethod: esbuild でバンドルする。SAM CLI は esbuild を
+#   PATH 上か対象パッケージの node_modules から探すが、npm workspaces では
+#   esbuild がルートへ巻き上げられて backend/node_modules に無い。そのため
+#   `sam build` は **必ず npm 経由**で呼ぶ（npm が node_modules/.bin を PATH に
+#   載せる）:  npm run sam:build -- --config-env <env>
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# パラメータ
+#   実アドレス・環境固有値はテンプレートにも samconfig.toml にも書かない
+#   （OSS 公開リポジトリのため）。デプロイ時に --parameter-overrides で注入する。
+# ---------------------------------------------------------------------------
+Parameters:
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: >-
+      CloudWatch Alarm（SNS）と AWS Budgets の通知先メールアドレス。
+      空の場合は SNS サブスクリプションと Budgets を作成しない（トポロジ検証のみ可能）。
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    Description: >-
+      AWS Budgets の月次上限（USD）。80%（既定では $8）で実績通知、
+      100% で予測通知する。design §3「監視」行の $8 = 目標の80% に対応。
+  CreateBudget:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      AWS Budgets はアカウント全体を対象とするため、複数環境スタックで
+      重複作成しない。dev スタックのみ true、prod スタックは false にする。
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  ShouldCreateBudget: !And
+    - !Condition HasAlertEmail
+    - !Equals [!Ref CreateBudget, 'true']
+
+Globals:
+  Function:
+    # nodejs24.x: GA・LTS でサポート期限 2028年4月（design §3 の nodejs22.x から
+    # 更新。2026-08-11 決定）。最新の nodejs26.x は preview で AWS が本番利用を
+    # 非推奨としており、実行ログに警告が出るため採用しない。26 が GA になったら
+    # この 1 行の変更で移行する。
+    Runtime: nodejs24.x
+    Architectures: [arm64]
+    Timeout: 15
+    MemorySize: 512
+    Environment:
+      Variables:
+        MAIN_TABLE: !Ref MainTable
+        MEDIA_BUCKET: !Ref MediaBucket
+        POWERTOOLS_SERVICE_NAME: oriorimap
+        POWERTOOLS_LOG_LEVEL: INFO
+
+Resources:
+  # -------------------------------------------------------------------------
+  # データ: DynamoDB シングルテーブル（design §6）
+  #   PK/SK + GSI1（公開一覧・cleanup走査）+ GSI2（オーナー別一覧）
+  #   ユーザーデータのため Retain。dev/prod いずれもスタック削除で消さない。
+  # -------------------------------------------------------------------------
+  MainTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${AWS::StackName}-main'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: GSI1PK, AttributeType: S }
+        - { AttributeName: GSI1SK, AttributeType: S }
+        - { AttributeName: GSI2PK, AttributeType: S }
+        - { AttributeName: GSI2SK, AttributeType: S }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        # GSI1: PUBLIC#MAP / PUBLIC#OVL の公開一覧、IMGSTATUS#*・USERSTATUS#* の cleanup 走査
+        - IndexName: GSI1
+          KeySchema:
+            - { AttributeName: GSI1PK, KeyType: HASH }
+            - { AttributeName: GSI1SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        # GSI2: USER#<ownerId> のマイページ一覧
+        - IndexName: GSI2
+          KeySchema:
+            - { AttributeName: GSI2PK, KeyType: HASH }
+            - { AttributeName: GSI2SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      # RateLimit エンティティ（design §6）の 2 時間 TTL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # -------------------------------------------------------------------------
+  # ストレージ: S3 ×2（design §2・§3「バックアップ」行）
+  # -------------------------------------------------------------------------
+  # SPA 静的アセット: 再ビルド可能なためバージョニング対象外・スタック削除で消してよい
+  SpaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-spa-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  # メディア（ユーザーアップロード画像）: バージョニング有効。
+  # アプリは通常の DeleteObject（削除マーカー作成）で即時不可視化し、
+  # 物理削除はライフサイクル（非現行30日失効＋孤立削除マーカー整理）に任せる。
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-media-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: clean-expired-delete-markers
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+
+  # -------------------------------------------------------------------------
+  # API: HTTP API（design §2）。JWT Authorizer は T003 で追加する
+  # -------------------------------------------------------------------------
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      # 想定外のトラフィックでコストが跳ねないよう既定スロットリングを入れる
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 20
+
+  # -------------------------------------------------------------------------
+  # Lambda: API 本体（design §4.2）。T002 時点のルートは GET /api/health のみ
+  # -------------------------------------------------------------------------
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: esm
+        OutExtension: ['.js=.mjs']
+        Target: es2022
+        Minify: false
+        Sourcemap: false
+        EntryPoints: [src/handlers/api.ts]
+    Properties:
+      CodeUri: backend/
+      Handler: api.handler
+      Description: OriOriMap API（Hono）。T002 時点では GET /api/health のみ
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MainTable }
+        - S3CrudPolicy: { BucketName: !Ref MediaBucket }
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/health
+            Method: GET
+
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 14
+
+  # -------------------------------------------------------------------------
+  # Lambda: cleanup バッチ（design §4.5。実装は T029・ここでは空実装＋結線のみ）
+  # -------------------------------------------------------------------------
+  CleanupFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: esm
+        OutExtension: ['.js=.mjs']
+        Target: es2022
+        Minify: false
+        Sourcemap: false
+        EntryPoints: [src/handlers/cleanup.ts]
+    Properties:
+      CodeUri: backend/
+      Handler: cleanup.handler
+      Description: OriOriMap cleanup バッチ（PENDING_DELETE回収 / 未添付画像回収 / 退会段階削除）
+      Timeout: 300
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref MainTable }
+        - S3CrudPolicy: { BucketName: !Ref MediaBucket }
+      Events:
+        Daily:
+          Type: ScheduleV2
+          Properties:
+            # 毎日 03:00 JST（design §4.5）
+            ScheduleExpression: cron(0 3 * * ? *)
+            ScheduleExpressionTimezone: Asia/Tokyo
+            Description: OriOriMap 日次 cleanup
+
+  CleanupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CleanupFunction}'
+      RetentionInDays: 14
+
+  # -------------------------------------------------------------------------
+  # 監視: CloudWatch Alarm（Lambda errors・APIGW 5xx）+ AWS Budgets（design §3・§7）
+  # -------------------------------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alerts'
+      DisplayName: OriOriMap Alerts
+
+  AlertTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  ApiFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-lambda-errors'
+      AlarmDescription: API Lambda がエラーを返した（design §7「Lambda関数エラー率上昇」）
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref ApiFunction }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  CleanupFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-cleanup-lambda-errors'
+      AlarmDescription: cleanup バッチが失敗した（冪等なので翌日再開するが検知はする）
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref CleanupFunction }
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  HttpApiServerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-httpapi-5xx'
+      AlarmDescription: HTTP API が 5xx を返した（design §7「APIGW 5xx」）
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - { Name: ApiId, Value: !Ref HttpApi }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: ShouldCreateBudget
+    Properties:
+      Budget:
+        BudgetName: !Sub '${AWS::StackName}-monthly-cost'
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref AlertEmail }
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref AlertEmail }
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API のベース URL（T004 で CloudFront 経由に切り替わる）
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+  AppUrl:
+    Description: >-
+      アプリの入口 URL。T004 までは HTTP API のエンドポイントを指す
+      （.github/workflows/deploy-dev.yml のスモークテスト契約）。
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+  MainTableName:
+    Description: DynamoDB シングルテーブル名
+    Value: !Ref MainTable
+  SpaBucketName:
+    Description: SPA 静的アセットのバケット名（deploy-dev.yml の s3 sync 先）
+    Value: !Ref SpaBucket
+  MediaBucketName:
+    Description: メディア（ユーザーアップロード画像）のバケット名
+    Value: !Ref MediaBucket
+  AlertTopicArn:
+    Description: アラート通知の SNS トピック ARN
+    Value: !Ref AlertTopic

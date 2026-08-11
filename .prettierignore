@@ -11,6 +11,8 @@ skills-lock.json
 # 自動生成物
 package-lock.json
 .aws-sam/
+# エージェント作業用 worktree（本体リポジトリのチェックアウトなので二重に検査しない）
+.worktrees/
 dist/
 build/
 coverage/

@@ -13,7 +13,7 @@
 ## 技術スタック
 
 - フロントエンド: React + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui。地図は Geolonia JS API（MapLibre GL JS互換）
-- バックエンド: API Gateway (HTTP API) + JWT Authorizer + Lambda (nodejs22.x / TypeScript + Hono) + DynamoDB シングルテーブル + S3 + CloudFront（IaC: SAM）
+- バックエンド: API Gateway (HTTP API) + JWT Authorizer + Lambda (nodejs24.x / TypeScript + Hono) + DynamoDB シングルテーブル + S3 + CloudFront（IaC: SAM）
 - 認証: Cognito User Pool（Liteティア）+ Google IdP + Hosted UI（Code + PKCE）
 - 共有: `shared/` ワークスペースの Zod スキーマ・定数（LIMITS / KASANE_COLORS）がフロント・バック共通の単一ソース
 - リポジトリ: npm workspaces モノレポ（shared / backend / frontend / e2e）
@@ -45,7 +45,7 @@
 
 - IaC: SAM（template.yaml）。リソース変更は必ずtemplate経由。コンソール手作業やad-hocなAWS CLI変更は禁止
 - デプロイフロー: iac-workflow スキルに従う（cfn-lint検証 → changeset確認 → デプロイ）。dev環境の更新はmainマージ後のCD（deploy-dev.yml）経由のみ
-- Lambda (Node.js 22.x / TypeScript):
+- Lambda (Node.js 24.x / TypeScript):
   - ビルドは SAM の `BuildMethod: esbuild`（`Format: esm`・`OutExtension: .js=.mjs`・`Target: es2022`）。tsc は型チェック専用（`noEmit`）
   - HTTPハンドラは Hono（`hono/aws-lambda` の `handle()`）。ルート定義とビジネスロジックを分離し、ロジックは単体テスト可能なモジュールに置く
   - ログ: Powertools for AWS Lambda (TypeScript) の Logger（構造化JSON）。`console.log` 禁止（ESLintで強制）。相関ID（requestId）を必ず含める
