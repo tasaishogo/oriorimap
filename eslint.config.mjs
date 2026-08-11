@@ -14,6 +14,9 @@ export default tseslint.config(
       '**/node_modules',
       '**/coverage',
       '.aws-sam',
+      // エージェント作業用 worktree（独自の tsconfig を持つ別チェックアウト。
+      // ルートの projectService から見えないので二重に検査しない）
+      '.worktrees/**',
       '**/*.config.{js,mjs,ts}',
       // autopilotハーネス（vendored・素のJS）はプロジェクトのTS lint対象外
       'scripts/**',
