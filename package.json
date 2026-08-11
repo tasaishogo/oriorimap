@@ -17,7 +17,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
     "sam:validate": "sam validate --lint --region ap-northeast-1",
-    "sam:build": "sam build"
+    "sam:build": "sam build",
+    "sam:local": "sam local start-api"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
