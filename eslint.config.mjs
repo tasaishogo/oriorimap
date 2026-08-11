@@ -17,6 +17,9 @@ export default tseslint.config(
       // エージェント作業用 worktree（独自の tsconfig を持つ別チェックアウト。
       // ルートの projectService から見えないので二重に検査しない）
       '.worktrees/**',
+      // project-autopilot のランタイム状態・証跡（evidence/ の使い捨て spec 等）。
+      // プロジェクトのソースではないので lint 対象外（.prettierignore と揃える）
+      '.agent-tasks/**',
       '**/*.config.{js,mjs,ts}',
       // autopilotハーネス（vendored・素のJS）はプロジェクトのTS lint対象外
       'scripts/**',
