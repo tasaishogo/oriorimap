@@ -25,7 +25,14 @@ const { mapInstance, GeoloniaMapCtor, sourceState, fakeSource } = vi.hoisted(() 
     isStyleLoaded: vi.fn(() => true),
     remove: vi.fn(),
   };
-  return { mapInstance, GeoloniaMapCtor: vi.fn(() => mapInstance), sourceState, fakeSource };
+  return {
+    mapInstance,
+    GeoloniaMapCtor: vi.fn(function () {
+      return mapInstance;
+    }),
+    sourceState,
+    fakeSource,
+  };
 });
 
 vi.mock('@geolonia/embed/core', () => ({
@@ -58,6 +65,7 @@ describe('SymbolLayers', () => {
         id: 'spots-symbol',
         type: 'symbol',
         source: 'spots',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.anything()/objectContaining()の戻り値はvitestの型定義上anyになるための既知の誤検知
         layout: expect.objectContaining({ 'icon-image': ['get', 'iconId'] }),
       }),
     );

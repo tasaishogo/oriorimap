@@ -19,7 +19,12 @@ const { mapInstance, GeoloniaMapCtor } = vi.hoisted(() => {
     isStyleLoaded: vi.fn(() => true),
     remove: vi.fn(),
   };
-  return { mapInstance, GeoloniaMapCtor: vi.fn(() => mapInstance) };
+  return {
+    mapInstance,
+    GeoloniaMapCtor: vi.fn(function () {
+      return mapInstance;
+    }),
+  };
 });
 
 vi.mock('@geolonia/embed/core', () => ({
@@ -75,6 +80,7 @@ describe('GeoloniaMap', () => {
       expect.objectContaining({ attributionControl: false }),
     );
     expect(GeoloniaMapCtor).not.toHaveBeenCalledWith(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.anything()/objectContaining()の戻り値はvitestの型定義上anyになるための既知の誤検知
       expect.objectContaining({ attributionControl: expect.anything() }),
     );
   });

@@ -27,9 +27,13 @@ const { mapInstance, GeoloniaMapCtor, controlInstance, GeolocateControlCtor } = 
   };
   return {
     mapInstance,
-    GeoloniaMapCtor: vi.fn(() => mapInstance),
+    GeoloniaMapCtor: vi.fn(function () {
+      return mapInstance;
+    }),
     controlInstance,
-    GeolocateControlCtor: vi.fn(() => controlInstance),
+    GeolocateControlCtor: vi.fn(function () {
+      return controlInstance;
+    }),
   };
 });
 
