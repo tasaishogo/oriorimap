@@ -62,7 +62,7 @@
   - _Requirements: 全画面・embed要件共通_
 
 - [ ] T005 [serial] CI（GitHub Actions）と共有dev環境の初回構築・疎通（Wave 0）
-  - **2026-08-12 改訂（OIDC ロールを作らない設計に変更）**: 当初の「CI/CD + OIDC フェデレーション」から **CD ごと廃止**し、dev の更新経路を **mvm-gate Lambda（cfn-guard）に一元化**した。理由: gate は Function URL が `AuthType=AWS_IAM` で呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため **GitHub Actions からは呼べず**（CD 専用ロールを作っても403）、かつ `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外――CD を残すと OIDC ロールに CFn 書き込みとデータプレーンの両方の権限が必要になり、IaC 実行経路が2系統になる。詳細は design §4.7「デプロイ経路」
+  - **2026-08-12 改訂（実装期は OIDC ロールを作らない）**: 当初の「CI/CD + OIDC フェデレーション」から、**実装期（Phase C・microvm 稼働中）は CD を持たず** dev の更新経路を **mvm-gate Lambda（cfn-guard）に一元化**する形に変更した。**恒久的に CD を持たないのではない**――初期構築が完了して波が常時回らなくなる運用期には CD を導入する（design §4.7「デプロイ経路」の【運用期】。導入は T034 の範囲）。理由: gate は Function URL が `AuthType=AWS_IAM` で呼び出し元 ARN を `assumed-role/mvm-proj-<name>/…` に限定するため **GitHub Actions からは呼べず**（CD 専用ロールを作っても403）、かつ `s3 sync` / CloudFront invalidation は CloudFormation ではないので gate の管轄外――CD を残すと OIDC ロールに CFn 書き込みとデータプレーンの両方の権限が必要になり、IaC 実行経路が2系統になる。詳細は design §4.7「デプロイ経路」
   - 対象: `.github/workflows/pipeline-gates.yml`（**build ジョブを追加**）、`.github/workflows/deploy-dev.yml`（**削除**）。template.yaml の変更なし（OIDC 用 IAM ロールは作らない）
   - **ci.yml は新規作成しない（2026-08-12 判明）**: bootstrap が設置した `pipeline-gates.yml` のヘッダーに「対応: docs/spec/02_design.md §4.7（ci.yml 相当）」と明記されており、lint / 型チェック / format / 単体テスト / 結合 / mutation は既に PR トリガーで実行されている。**欠けているのは `sam validate` とビルド可能性の検証だけ**なので、新規ファイルを作らず同ファイルに `build` ジョブを足す（重複した CI 実行と重複したシグナルを避ける）
   - 内容: `pipeline-gates.yml` に `build` ジョブ（`npm ci` → `npm run sam:validate` → `npm run sam:build` → `npm run build -w frontend`。**AWS 認証情報は不要**）を追加し、bootstrap 設置の deploy-dev.yml を削除する。あわせて dev スタック（`oriorimap-dev`）を初回構築する
@@ -268,7 +268,7 @@
 
 - [ ] T031 [serial] 独自ドメイン（oriorimap.kiryu.tech）・ACMのIaC組み込みとprod初期デプロイ
   - 対象: template.yaml, samconfig.toml（prod）
-  - 内容: ACM証明書（us-east-1・DNS検証）とCloudFrontエイリアス `oriorimap.kiryu.tech` をテンプレートへ追加し、prodスタックを初期デプロイ（health-only疎通）。証明書作成後に検証CNAMEの値を出力してT030（人間のCloudflare登録）を依頼し、ISSUEDを待って続行する。Route 53は使用しない（DNSはCloudflare管理・design §3）
+  - 内容: ACM証明書（us-east-1・DNS検証）とCloudFrontエイリアス `oriorimap.kiryu.tech` をテンプレートへ追加し、prodスタックを初期デプロイ（health-only疎通）。**prod スタックには `--role-arn mvm-proj-oriorimap-cfn` を付けない**（2026-08-12 追記）――prod は gate を通さず人間が明示デプロイする設計（design §4.7）であり、付けると `proj retire` の F19 ガードの制約を prod まで背負い込むため。dev だけが microvm に紐づく形にする。証明書作成後に検証CNAMEの値を出力してT030（人間のCloudflare登録）を依頼し、ISSUEDを待って続行する。Route 53は使用しない（DNSはCloudflare管理・design §3）
   - Done条件: `curl https://oriorimap.kiryu.tech/api/health` が200、`https://oriorimap.kiryu.tech/` が200でSPAを配信する（health-only。地図表示を含む本番動作確認はT034で実施し、機能スライスへの依存は持たない）
   - 依存: T030, T005
   - _Requirements: §4非機能（本番環境）_
@@ -288,6 +288,7 @@
 - [ ] T034 運用仕上げ: runbook・復元テスト・アラート確認
   - 対象: README.md（運用手順書）, docs/
   - 内容: Geolonia表示回数ルーチン（design §4.8）・DynamoDB PITR/S3バージョニングからの復元手順・管理者シード手順をrunbook化し、devで復元テストを1回実施。Budgets/Alarmの通知先を確認。本番ドメインでの動作確認（地図トップ表示・Geolonia地図ロード）を実施
+  - **運用期への移行（2026-08-12 追加）**: 初期構築が完了し microvm の波が常時回らなくなるため、**dev 向け CD（GitHub Actions + OIDC ロール1本）を導入**して dev の書き手を「main へのマージ」に戻す（design §4.7【運用期】）。gate 経路は休眠させる（削除しない）。**`proj retire` は行わない**――F19 ガード（`mvm-proj-oriorimap-cfn` を参照するスタックがある間は retire 拒否）に抵触し dev を捨てることになるうえ、vend スタックの中身は呼ばれなければ実質 $0 で残す害がない
   - Done条件: PITRからの復元テストが成功し手順どおり文書化されている。Budgetsのテスト通知が届く。`https://<本番ドメイン>/` で地図トップが表示されGeolonia地図がロードされる
   - 依存: T029, T031, T022
   - _Requirements: §4可用性・運用・コスト_
