@@ -15,7 +15,7 @@
 - **完了 10件**: T001, T002, T003, T004, T006, T007, T008, T009, T011, T033（各タスクの完了記録・PR番号は該当項目を参照）
 - **未着手 29件**: 上記以外。うち T005 は次の着手候補（Phase B最後の未完了）
   - T005-a（CIへのbuildジョブ追加・`deploy-dev.yml`削除）: 未着手（現状 `.github/workflows/` は `deploy-dev.yml` と `pipeline-gates.yml` のみで、後者に `build` ジョブは無い）
-  - T005-b（devスタック初回構築）: 未着手。AWSアカウント側を確認したところ `oriorimap-dev` スタックは存在しない（`mvm-vend-oriorimap`＝microvm払い出し基盤のみ存在）。事前ブロッカーだったScheduleV2のPermissionsBoundary波及問題はPR#11で解消済みのため、着手条件は揃っている
+  - T005-b（devスタック初回構築）: **完了（2026-08-12）**。`oriorimap-dev` を CFnサービスロール `mvm-proj-oriorimap-cfn` 付き（スティッキー参照を確認済み）で gate 経由により構築し、`curl https://d1xg2jeym7k92s.cloudfront.net/api/health` が200・JWT必須ルート（/api/health-auth）は401を確認。**dev CloudFrontドメインは `d1xg2jeym7k92s.cloudfront.net`（T039 のGeoloniaキー登録はこの値）**。初回構築で踏んだ落とし穴2件（PermissionsBoundaryのFn::If包みがguardで検証不能 / ScheduleV2の自動命名がスタック名始まりにならず権限スコープ外）の詳細と対処はPR#15と運用注記★T005-bを参照。SPAルート（/）はフロント資産未syncのため403（想定どおり・health-onlyが本タスクの範囲）
 - **見栄えの確認可否**: dev環境（CloudFront経由URL）は未構築のためdev URLでの確認は不可。ローカルで `npm run dev -w frontend` を起動すればT007（テーマ・共通レイアウト）とT009（Geolonia地図・サンプル3スポット表示）は確認可能（Geolonia APIキーは`frontend/.env.local`に設定済み、`localhost`はキーのURL制限対象外）。Phase C（T012〜）が未着手のため、ログイン・地図CRUD等の実機能画面はまだプレースホルダ（`frontend/src/pages/*.tsx` は見出しのみの10〜12行）
 - **裏取り方法**: `git log --all`・`gh pr list --state all`（PR#1〜#11は全てmerged）・実ファイル構成（backend/frontend/shared配下）・AWS CLI（`aws cloudformation list-stacks --profile smb-infra`）を突合
 
