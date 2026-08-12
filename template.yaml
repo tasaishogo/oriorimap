@@ -193,6 +193,13 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       UserPoolName: !Sub '${AWS::StackName}-users'
+      # ★必須タグ（2026-08-12・GX21 契約）: microvm ワーカーの実行ロール
+      # （mvm-proj-oriorimap）の cognito-idp 権限は ABAC
+      # （aws:ResourceTag/Project=oriorimap）で絞られている。このタグが無いと
+      # verify スクリプト等の admin-* 呼び出しが AccessDenied になる
+      # （同居する他プロジェクトのプールに触れないための fail-closed 設計）。
+      UserPoolTags:
+        Project: oriorimap
       # Lite: 無料枠 10,000 MAU。passkey/パスワードレス等の上位機能は使わない
       UserPoolTier: LITE
       # メールアドレスをユーザー名として使う（大文字小文字を区別しない）
