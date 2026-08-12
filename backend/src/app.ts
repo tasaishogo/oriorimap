@@ -2,10 +2,8 @@ import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { logger } from './lib/logger.js';
 import { toErrorResponse } from './lib/error-response.js';
-
-type Bindings = {
-  requestContext?: { requestId?: string };
-};
+import { meRoutes } from './routes/me.js';
+import type { Bindings } from './types.js';
 
 export const app = new Hono<{ Bindings: Bindings }>();
 
@@ -13,6 +11,8 @@ app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
 // JWT Authorizerの検証自体はAPI Gateway側の責務のため、Lambda内のハンドラはhealthと同一（design §4.2）。
 app.get('/api/health-auth', (c) => c.json({ status: 'ok' }));
+
+app.route('/', meRoutes);
 
 app.notFound((c) => c.json({ code: 'NOT_FOUND', message: 'Not Found' }, 404));
 

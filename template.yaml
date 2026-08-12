@@ -338,7 +338,7 @@ Resources:
     Properties:
       CodeUri: backend/
       Handler: api.handler
-      Description: OriOriMap API（Hono）。T003 時点では /api/health と /api/health-auth のみ
+      Description: OriOriMap API（Hono）。/api/health・/api/health-auth・/api/me（T012）
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MainTable }
         - S3CrudPolicy: { BucketName: !Ref MediaBucket }
@@ -359,6 +359,14 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /api/health-auth
+            Method: GET
+        # オーナー系: プロフィール取得（design §4.2・§4.3。T012）。
+        # DefaultAuthorizer（CognitoJwtAuthorizer）がそのまま効く
+        Me:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/me
             Method: GET
 
   ApiFunctionLogGroup:
