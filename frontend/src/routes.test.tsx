@@ -1,6 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { AuthContext } from './features/auth/AuthContext';
+import type { AuthContextValue } from './features/auth/types';
 import AppRoutes from './routes';
+
+vi.mock('@/features/auth/api', () => ({ fetchMe: vi.fn().mockResolvedValue(null) }));
 
 vi.mock('@geolonia/embed/core', () => ({
   GeoloniaMap: vi.fn(function () {
@@ -43,6 +47,16 @@ function renderAt(path: string) {
   );
 }
 
+function renderAtWithAuth(path: string, value: AuthContextValue) {
+  return render(
+    <AuthContext.Provider value={value}>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </AuthContext.Provider>,
+  );
+}
+
 describe('AppRoutes', () => {
   it('renders the top page (トップ / 検索・一覧) at /', () => {
     renderAt('/');
@@ -74,8 +88,19 @@ describe('AppRoutes', () => {
     expect(screen.getByTestId('page-heading')).toHaveTextContent('embed設定');
   });
 
-  it('renders my page (マイページ) at /mypage', () => {
+  it('redirects an unauthenticated visitor from /mypage to /login (R1.6)', () => {
     renderAt('/mypage');
+    expect(screen.getByRole('banner')).toBeInTheDocument();
+    expect(screen.getByTestId('page-heading')).toHaveTextContent('ログイン');
+  });
+
+  it('renders my page (マイページ) at /mypage when authenticated', () => {
+    renderAtWithAuth('/mypage', {
+      status: 'authenticated',
+      userId: 'user-1',
+      refresh: async () => {},
+      signOut: async () => {},
+    });
     expect(screen.getByRole('banner')).toBeInTheDocument();
     expect(screen.getByTestId('page-heading')).toHaveTextContent('マイページ');
   });

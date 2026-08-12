@@ -24,17 +24,8 @@ describe('MyPage', () => {
     fetchMe.mockReset();
   });
 
-  it('未ログインの場合はログインへの案内を表示し、プロフィールは取得しない（R1.6）', () => {
-    renderWithAuth({
-      status: 'unauthenticated',
-      userId: null,
-      refresh: async () => {},
-      signOut: vi.fn(),
-    });
-
-    expect(screen.getByText(/ログイン/)).toBeInTheDocument();
-    expect(fetchMe).not.toHaveBeenCalled();
-  });
+  // 未ログイン訪問者への対応はProtectedRoute側の責務（features/auth/ProtectedRoute.test.tsx）。
+  // MyPageはrouteに組み込まれた時点で常にauthenticatedとして呼ばれる（R1.6）。
 
   it('ログイン済みの場合はプロフィールを取得して表示する', async () => {
     fetchMe.mockResolvedValue({

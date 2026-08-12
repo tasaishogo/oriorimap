@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
+import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import Admin from './pages/Admin';
 import Confirm from './pages/Confirm';
 import EmbedSettings from './pages/EmbedSettings';
@@ -85,7 +86,9 @@ export default function AppRoutes() {
         path="/mypage"
         element={
           <AppLayout>
-            <MyPage />
+            <ProtectedRoute>
+              <MyPage />
+            </ProtectedRoute>
           </AppLayout>
         }
       />
