@@ -10,6 +10,15 @@
 |---|---|---|---|
 | 39 | 17 | Setup 1 / Foundational 11 / スライス 19 / Polish 8 | R1〜R8 全対応（R3.4・R9はP2で対象外） |
 
+## 進捗ステータス（2026-08-12 更新・git/PR履歴と突合し本ファイルの[x]状態を補正）
+
+- **完了 10件**: T001, T002, T003, T004, T006, T007, T008, T009, T011, T033（各タスクの完了記録・PR番号は該当項目を参照）
+- **未着手 29件**: 上記以外。うち T005 は次の着手候補（Phase B最後の未完了）
+  - T005-a（CIへのbuildジョブ追加・`deploy-dev.yml`削除）: 未着手（現状 `.github/workflows/` は `deploy-dev.yml` と `pipeline-gates.yml` のみで、後者に `build` ジョブは無い）
+  - T005-b（devスタック初回構築）: 未着手。AWSアカウント側を確認したところ `oriorimap-dev` スタックは存在しない（`mvm-vend-oriorimap`＝microvm払い出し基盤のみ存在）。事前ブロッカーだったScheduleV2のPermissionsBoundary波及問題はPR#11で解消済みのため、着手条件は揃っている
+- **見栄えの確認可否**: dev環境（CloudFront経由URL）は未構築のためdev URLでの確認は不可。ローカルで `npm run dev -w frontend` を起動すればT007（テーマ・共通レイアウト）とT009（Geolonia地図・サンプル3スポット表示）は確認可能（Geolonia APIキーは`frontend/.env.local`に設定済み、`localhost`はキーのURL制限対象外）。Phase C（T012〜）が未着手のため、ログイン・地図CRUD等の実機能画面はまだプレースホルダ（`frontend/src/pages/*.tsx` は見出しのみの10〜12行）
+- **裏取り方法**: `git log --all`・`gh pr list --state all`（PR#1〜#11は全てmerged）・実ファイル構成（backend/frontend/shared配下）・AWS CLI（`aws cloudformation list-stacks --profile smb-infra`）を突合
+
 ## 凡例
 
 - `[P]`: 依存タスク完了後、他の[P]タスクと並列着手可能
@@ -27,7 +36,7 @@
   - ~~**microvm の払い出しはアカウント違いのためやり直しが必要（2026-08-11 判明）**~~ → **解消（2026-08-12）**: mvm-poc セッションが smb-infra へ host モードで払い出しを実施し、当方で実測確認済み。実行ロール `mvm-proj-oriorimap` / CFn サービスロール `mvm-proj-oriorimap-cfn`（いずれも `mvm-boundary` 付き）/ artifacts バケット `oriorimap-sam-artifacts-820315588078`（PAB 全ON）/ guard=whitelist・protected=["oriorimap-dev","oriorimap-prod"]・eph-ttl 4h / trust=ローカル SSO ロール＋hub の同名ロール（将来の microvm 用に先付け）。`mvm-vend-oriorimap` は CREATE_COMPLETE。**CloudFront Function の guard 許可も hub・smb-infra 両方の gate に反映済み**で、本経路 E2E（local SSO → assume → `AWS::CloudFront::Function` を含む ChangeSet → gate `/execute` → executed → `/delete` 回収）で実証されている。なお **microvm（発射後非接続）にするには追加で hub 側 vend と R1b、および autopilot への targets 注入結線（mvm-poc 残件#16・実装中）が要る**。host モードは上記の払い出しだけで動く
   - **★T005-b の事前確認（2026-08-12・未検証事項あり）**: gate は Processed テンプレート全体を whitelist で評価するため、初回実行の前に **`tools/proj gate oriorimap oriorimap-dev <changeset> --dry-run` で必ず判定を先取りする**（mvm-poc 助言）。判明済みの論点:
     - `10-iam-role.guard` は**全 `AWS::IAM::Role` に `PermissionsBoundary` を要求**する。本テンプレートの IAM ロールは SAM 自動生成のため既定では boundary が付かず、そのままでは弾かれる（かつ CFn サービスロール側の boundary Deny で実デプロイも失敗する）。→ `Globals.Function.PermissionsBoundary` をパラメータ `UseMvmBoundary`（既定 true）付きで追加済み
-    - **未検証**: `ScheduleV2` イベントから SAM が生成するスケジューラ用ロール（`CleanupFunctionDailyRole`）に、Function 側の `PermissionsBoundary` が波及するかは未確認。波及しない場合は当該ロールを自前定義して boundary を付けるか、`ScheduleV2` の `RoleArn` に自前ロールを渡す必要がある。**`--dry-run` の結果で確定させること**
+    - ~~**未検証**: `ScheduleV2` イベントから SAM が生成するスケジューラ用ロール（`CleanupFunctionDailyRole`）に、Function 側の `PermissionsBoundary` が波及するかは未確認。~~ → **解消（2026-08-12・PR#11 `fix(iac): ScheduleV2 が生成するロールにも Permissions Boundary を付ける`）**: AWS SAM公式ドキュメント（sam-property-function-schedulev2）の記載どおり波及しないことが判明したため、`ScheduleV2` に独立した `PermissionsBoundary` を明示。`sam validate --lint` はPASS。実際のgate（cfn-guard）判定はT005-b実行時の `--dry-run` で最終確認する
     - 初回は `--change-set-type CREATE`（既存スタックがあれば UPDATE）
   - **host モードでの IaC 実行手順（2026-08-12・gate 経由。OIDC ロールは使わない）**:
     1. `AWS_PROFILE=smb-infra` でローカル SSO から `mvm-proj-oriorimap` を assume（trust 登録済み）
@@ -61,14 +70,14 @@
 
 ## Phase B: Foundational
 
-- [ ] T002 [serial] SAM IaC: データ・API基盤の作成と使い捨てスタックdry-run（Wave 0）
+- [x] T002 [serial] SAM IaC: データ・API基盤の作成と使い捨てスタックdry-run（Wave 0）（2026-08-11 完了・PR#2 `feat(iac): SAM でデータ・API基盤を構築`）
   - 対象: template.yaml, samconfig.toml, backend/src/handlers/api.ts（healthのみ）
   - 内容: design §2/§3 のうち DynamoDB（シングルテーブル+GSI×2・PITR）/ S3×2（メディアはバージョニング+ライフサイクル30日）/ HTTP API / Lambda（`GET /api/health` のみ）/ EventBridge Scheduler（空のcleanup）/ CloudWatch Alarm / AWS Budgets($8/80%) をテンプレート化
   - Done条件: `sam validate` が通り、使い捨てスタックへ `sam deploy` 成功後 `curl <APIエンドポイント>/api/health` が200を返す。確認後 `sam delete` でスタック削除
   - 依存: T001
   - _Requirements: 全API/データ要件共通_
 
-- [ ] T003 [serial] SAM IaC: Cognito User Pool + JWT Authorizer 追加とdry-run（Wave 0）
+- [x] T003 [serial] SAM IaC: Cognito User Pool + JWT Authorizer 追加とdry-run（Wave 0）（2026-08-11 完了・PR#5 `feat(iac): Cognito User Pool と JWT Authorizer を追加`）
   - 対象: template.yaml
   - 内容: Cognito User Pool（Liteティア明示・メール+パスワード・メール検証必須・**確認メール本文は日本語**・Cognito既定メール送信）と HTTP API の JWT Authorizer 接続を追加（design §4.3。Google IdPはT013で追加）。Authorizer検証用に、既存healthハンドラを流用したAuthorizer付きルート `GET /api/health-auth` をテンプレートに追加（アプリコードの変更なし）
   - **2026-08-11 改訂（ログインUI方式の変更に伴う）**: 当初の「Hosted UI日本語」は AWS 仕様上成立しない（日本語化は managed login 限定＝Essentials 以上。Liteは英語のclassic hosted UIのみ）。**ログインUIは自前実装に変更**したため本タスクのスコープから Hosted UI の日本語化が外れ、代わりに **App client の `ExplicitAuthFlows`（`ALLOW_USER_SRP_AUTH`＋`ALLOW_REFRESH_TOKEN_AUTH`＋`ALLOW_ADMIN_USER_PASSWORD_AUTH`。`ALLOW_USER_PASSWORD_AUTH`は有効化しない）**と、Googleフェデレーション用の Cognito ドメイン（`ManagedLoginVersion: 1`）が対象に入る。詳細は design §4.3
@@ -76,7 +85,7 @@
   - 依存: T002
   - _Requirements: R1.1, R1.3, R1.6_
 
-- [ ] T004 [serial] SAM IaC: CloudFront配線の追加とdry-run（Wave 0）
+- [x] T004 [serial] SAM IaC: CloudFront配線の追加とdry-run（Wave 0）（2026-08-11 完了・PR#6 `feat(iac): CloudFront 配信基盤を追加しデプロイ先アカウントを固定`）
   - 対象: template.yaml, frontend/（プレースホルダindex.html）
   - 内容: CloudFrontディストリビューション（default→S3 SPA[OAC] / `/media/*`→S3メディア / `/api/*`・`/embed/*`→API Gateway・キャッシュ無効）を追加（design §2）
   - Done条件: 使い捨てスタックで `curl https://<cf-domain>/api/health` が200、`https://<cf-domain>/` がプレースホルダHTMLを返す
@@ -98,7 +107,7 @@
   - **注記（esbuild）**: ci.yml で `sam validate` 以上（`sam build`）を行う場合は `npm ci` の後に **`npm run sam:build`** で呼ぶこと。素の `sam build` は npm workspaces の巻き上げにより `Cannot find esbuild` で失敗する（AGENTS.md P2-Node 規約）
   - _Requirements: 全要件共通（デプロイ経路）_
 
-- [ ] T006 [P] バックエンド骨格（Hono + 共有Zodスキーマ + テスト基盤）
+- [x] T006 [P] バックエンド骨格（Hono + 共有Zodスキーマ + テスト基盤）（2026-08-11 完了・PR#9 `feat(backend): Honoアプリ骨格・共有Zodスキーマ・LIMITS/KASANE_COLORS定数を実装`）
   - 対象: shared/schemas/, shared/constants.ts, backend/src/app.ts, backend/src/lib/, backend/tests/, vitest設定
   - 内容: Honoアプリ骨格（エラー形式 `{code,message,details?}`・Powertools Logger）、design §6 のエンティティZodスキーマと LIMITS/KASANE_COLORS 定数、Vitest+aws-sdk-client-mock のテスト基盤
   - Done条件: `npm test -w backend` が通り、`sam local start-api` で `/api/health` が200
@@ -106,7 +115,7 @@
   - **注記（ガード対象パス）**: テストランナー設定ファイル（vitest.config）は保護パターンに交差するため**人間著作差分**として扱うこと
   - _Requirements: 全API要件共通_
 
-- [ ] T007 [P] フロント骨格 + テーマ・共通レイアウトシェル
+- [x] T007 [P] フロント骨格 + テーマ・共通レイアウトシェル（2026-08-11 完了・PR#4 `フロント骨格 + テーマ・共通レイアウトシェル`）
   - 対象: frontend/（Vite React TS雛形）, frontend/src/styles/tokens.css, frontend/src/components/layout/, フォントアセット, vitest設定
   - 内容: design §5.2 のデザイントークン（藤重: `#614C9B`系・かさね色パレット・Zen Old Mincho/Noto Sans JPセルフホスト・16px/44pxタップ）をTailwind @themeとして実装し、ヘッダー付き共通レイアウトとルーティング骨格（§5.1のパス）を構築。shadcn/ui導入とプライマリ色差し替え
   - Done条件: `npm run dev -w frontend` でサンプルページがトークン適用済みテーマ・共通レイアウトで表示され、`npm test -w frontend` が通る
@@ -127,10 +136,11 @@
   - 依存: T005, T008
   - _Requirements: R2, R4系の前提_
 
-- [ ] T009 地図コンポーネント基盤（Geolonia表示・Symbolレイヤー・現在地・帰属表記）
+- [x] T009 地図コンポーネント基盤（Geolonia表示・Symbolレイヤー・現在地・帰属表記）（2026-08-12 完了・PR#10）
   - 対象: frontend/src/components/map/（GeoloniaMap, SymbolLayers, LegendCard骨格, GeolocateButton）
   - 内容: Geolonia JS APIのReactラッパを実装。GeoJSONのSymbolレイヤー+`addImage`描画、全スポットfitBounds（0件時は日本全体）、GeolocateControl（拒否時は通常表示継続）、帰属表記の常時表示（design §3, R2.10, R4.7-4.8）。Geolonia公式サンプルでカスタムマーカー実装方式を最終裏取りし、結果を設計書§10へ追記（詳細設計タスク）
   - Done条件: サンプルGeoJSON（カスタム画像アイコン含む3点）が表示され、fitBounds・現在地ボタン・位置情報拒否時の継続動作を localhost で手動確認（手順をタスク完了コメントに記録）
+  - **完了記録（2026-08-12）**: `npm test -w frontend` 57/57 PASS・型/Lintエラー0・`e2e/map-foundation.spec.ts`（Playwright実ブラウザ）3/3 PASS。`MapView` ページに東京駅・浅草寺・みなとみらいのサンプル3点を実装し、fitBounds・現在地ボタン・帰属表記コントロールを実ブラウザで確認済み（詳細: `.agent-tasks/T009/report.md`）。verdict: PASS_WITH_LIMITATIONS（既知upstream不具合を許容リストで記録、機能に影響なし）
   - 依存: T007, T008
   - _Requirements: R2.10, R4.7, R4.8_
 
