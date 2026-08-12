@@ -392,6 +392,12 @@ Resources:
             ScheduleExpression: cron(0 3 * * ? *)
             ScheduleExpressionTimezone: Asia/Tokyo
             Description: OriOriMap 日次 cleanup
+            # Name 未指定だと SAM は「<関数論理ID><イベントID>」（CleanupFunctionDaily）を
+            # スケジュール名にする（CFn 自動採番のスタック名プレフィックスは付かない）。
+            # CFn サービスロールの scheduler 権限は schedule/*/oriorimap-* に限定されて
+            # いるため、スタック名始まりの名前を明示する（T005-b 初回構築の実デプロイで
+            # AccessDenied になった実績あり）。
+            Name: !Sub '${AWS::StackName}-cleanup-daily'
             # ScheduleV2 は EventBridge Scheduler のターゲット用に別ロールを生成する。
             # Globals.Function.PermissionsBoundary は「関数の実行ロール」限定で
             # ここには波及しない（AWS SAM 公式 sam-property-function-schedulev2 の
