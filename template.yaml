@@ -404,6 +404,15 @@ Resources:
             ScheduleExpression: cron(0 3 * * ? *)
             ScheduleExpressionTimezone: Asia/Tokyo
             Description: OriOriMap 日次 cleanup
+            # ScheduleV2 は EventBridge Scheduler のターゲット用に別ロールを生成する。
+            # Globals.Function.PermissionsBoundary は「関数の実行ロール」限定で
+            # ここには波及しない（AWS SAM 公式 sam-property-function-schedulev2 の
+            # Note: PermissionsBoundary は scheduler schedule's target IAM role に適用）。
+            # cfn-guard 10-iam-role は全 IAM ロールに boundary を要求するため明示する。
+            PermissionsBoundary: !If
+              - UsesMvmBoundary
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
+              - !Ref 'AWS::NoValue'
 
   CleanupFunctionLogGroup:
     Type: AWS::Logs::LogGroup
