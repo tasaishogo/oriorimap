@@ -12,8 +12,8 @@
 
 ## 進捗ステータス（2026-08-12 更新・git/PR履歴と突合し本ファイルの[x]状態を補正）
 
-- **完了 10件**: T001, T002, T003, T004, T006, T007, T008, T009, T011, T033（各タスクの完了記録・PR番号は該当項目を参照）
-- **未着手 29件**: 上記以外。うち T005 は次の着手候補（Phase B最後の未完了）
+- **完了 12件**: T001, T002, T003, T004, T006, T007, T008, T009, T010, T011, T033, T039（各タスクの完了記録・PR番号は該当項目を参照）
+- **未着手 27件**: 上記以外。うち T005 は T005-b まで完了・T005-a のみ残（Phase B最後の未完了）
   - T005-a（CIへのbuildジョブ追加・`deploy-dev.yml`削除）: 未着手（現状 `.github/workflows/` は `deploy-dev.yml` と `pipeline-gates.yml` のみで、後者に `build` ジョブは無い）
   - T005-b（devスタック初回構築）: **完了（2026-08-12）**。`oriorimap-dev` を CFnサービスロール `mvm-proj-oriorimap-cfn` 付き（スティッキー参照を確認済み）で gate 経由により構築し、`curl https://d1xg2jeym7k92s.cloudfront.net/api/health` が200・JWT必須ルート（/api/health-auth）は401を確認。**dev CloudFrontドメインは `d1xg2jeym7k92s.cloudfront.net`（T039 のGeoloniaキー登録はこの値）**。初回構築で踏んだ落とし穴2件（PermissionsBoundaryのFn::If包みがguardで検証不能 / ScheduleV2の自動命名がスタック名始まりにならず権限スコープ外）の詳細と対処はPR#15と運用注記★T005-bを参照。SPAルート（/）はフロント資産未syncのため403（想定どおり・health-onlyが本タスクの範囲）
 - **見栄えの確認可否**: dev環境（CloudFront経由URL）は未構築のためdev URLでの確認は不可。ローカルで `npm run dev -w frontend` を起動すればT007（テーマ・共通レイアウト）とT009（Geolonia地図・サンプル3スポット表示）は確認可能（Geolonia APIキーは`frontend/.env.local`に設定済み、`localhost`はキーのURL制限対象外）。Phase C（T012〜）が未着手のため、ログイン・地図CRUD等の実機能画面はまだプレースホルダ（`frontend/src/pages/*.tsx` は見出しのみの10〜12行）
@@ -131,9 +131,10 @@
   - 依存: なし
   - _Requirements: R2, R4系の前提_
 
-- [ ] T039 [P] 【人間】Geolonia APIキーへのdev CloudFrontドメイン登録
+- [x] T039 [P] 【人間】Geolonia APIキーへのdev CloudFrontドメイン登録（2026-08-12 完了）
   - 内容: T005で確定したdev CloudFrontドメインを、T008で発行したGeolonia APIキーのURL一覧に登録する（dev環境での地図表示に必要）
   - Done条件: dev CloudFrontドメインがキーのURL一覧に表示されている
+  - **完了記録（2026-08-12）**: ユーザーが `https://d1xg2jeym7k92s.cloudfront.net` をキーのURL一覧へ登録済み（本人確認）
   - 依存: T005, T008
   - _Requirements: R2, R4系の前提_
 
@@ -145,9 +146,10 @@
   - 依存: T007, T008
   - _Requirements: R2.10, R4.7, R4.8_
 
-- [ ] T010 [P] 【人間】Google OAuthクライアント作成
+- [x] T010 [P] 【人間】Google OAuthクライアント作成（2026-08-12 完了）
   - 内容: Google Cloud Console でOAuth同意画面とクライアントID/シークレットを作成する（リダイレクトURIはCognitoドメイン。手順はタスク実行時にエージェントが提示）
   - Done条件: クライアントID/シークレットが取得され、SSMパラメータ（またはSecretsManager）に格納されている
+  - **完了記録（2026-08-12）**: ユーザーが同意画面とクライアントを作成し、SSMへ格納済み。`/oriorimap/dev/google/client-id`（String）と `/oriorimap/dev/google/client-secret`（SecureString）の実在・型をAWS CLIで確認済み。リダイレクトURIは dev Cognito ドメイン（oriorimap-dev.auth.ap-northeast-1.amazoncognito.com）の /oauth2/idpresponse
   - 依存: T003
   - _Requirements: R1.2の前提_
 
