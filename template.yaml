@@ -335,6 +335,14 @@ Resources:
         Minify: false
         Sourcemap: false
         EntryPoints: [src/handlers/api.ts]
+        # AWS SDK v3（@smithy/node-http-handler等）はCJS前提でnode:https等を
+        # requireするが、ESM出力にはrequireが無く"Dynamic require of ... is not
+        # supported"で落ちる（T012でDynamoDB呼び出しを追加して初めて顕在化・実機確認）。
+        # createRequireでrequireを補うのがesbuild公式の回避策
+        Banner:
+          - >-
+            js=import{createRequire}from'module';const
+            require=createRequire(import.meta.url);
     Properties:
       CodeUri: backend/
       Handler: api.handler
