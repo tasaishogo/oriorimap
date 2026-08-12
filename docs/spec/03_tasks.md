@@ -56,6 +56,7 @@
     - 検証が複数ある場合は **1本のスクリプト（`scripts/verify/T0xx.sh`）へ集約**してコードスパンを1個に保つ
     - **2026-08-12 実施済み**: Phase C 全タスク（T012〜T029・T038）を本書式へ改訂した。検証スクリプトは各タスクの成果物として実装時に作成する（スクリプト不在なら verify が失敗する＝作り忘れは機械的に検知される）。dev環境の確認は curl / AWS CLI で自動化できるものをスクリプトへ寄せ、ブラウザ操作を要する確認だけを括弧内散文の「人手確認」として残した（人手確認の結果はPRに記録し、レビューで承認する）
     - **verify スクリプトが dev（smb-infra）の AWS を叩く場合、冒頭で mvm-target-env による spoke ロールの assume を行う**――VM 本来の hub ロールでは smb-infra を触れない。ユニットテスト部分は assume 不要。#16 で autopilot がタスクプロンプトへ自動注入する規約と同じだが、**verify スクリプト自身にも前処理が要る**
+    - **Cognito は ABAC 契約（2026-08-12 追記・GX21）**: ワーカー実行ロール（mvm-proj-oriorimap）の cognito-idp 権限は `aws:ResourceTag/Project=oriorimap` 条件で絞られている（同一アカウントに他プロジェクトのプールが同居するため。タグの無いプールには一切触れない fail-closed）。**User Pool には必ず `UserPoolTags: {Project: oriorimap}` を付けること**（template.yaml で恒久化済み）。根拠となる実事故: T012 の verify が admin-get-user の AccessDenied で2回失敗し VM が suspend した
     - この改訂は **microvm 固有の準備**である。host モードで回す場合は autopilot の recipe と PM ランブックが検証を担うため不要
   - **effect-plane（`*-eph-deployer` / `*-eph-tester` / `eph-env.yml`）は設置しない（2026-08-11 決定）**: IaC の実行経路は mvm-gate Lambda（cfn-guard）に一元化する。2系統持つと guard ルールの二重管理になるため。ただし T005 の CD 用 OIDC ロール（`DEV_DEPLOY_ROLE_ARN`）は別目的（人間が承認済み＝mainマージ済みの変更を dev へ反映する信頼された経路）であり、採否は T005 着手時に確定する
 - 【人間】タスク（T008, T010, T011, T030, T039）は**どちらのモードでも無人キューに投入しない**。各波の投入前に、その波が依存する【人間】タスクを先に完了させる
