@@ -53,20 +53,8 @@ Parameters:
     Type: CommaDelimitedList
     Default: http://localhost:5173/
     Description: サインアウト後のリダイレクト先（Cognito App client の LogoutURLs）。
-  UseMvmBoundary:
-    Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
-    Description: >-
-      Lambda 実行ロールに Permissions Boundary `mvm-boundary` を付けるか。
-      本プロジェクトの IaC は mvm-gate（cfn-guard）経由で実行され、
-      10-iam-role.guard が全 AWS::IAM::Role に PermissionsBoundary を要求する
-      （付けないと CFn サービスロール側の boundary Deny でデプロイ自体も失敗する）。
-      mvm 環境以外へ流用する場合のみ false にする。
-
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
-  UsesMvmBoundary: !Equals [!Ref UseMvmBoundary, 'true']
   ShouldCreateBudget: !And
     - !Condition HasAlertEmail
     - !Equals [!Ref CreateBudget, 'true']
@@ -81,11 +69,11 @@ Globals:
     Architectures: [arm64]
     Timeout: 15
     MemorySize: 512
-    # 生成される実行ロールに Permissions Boundary を付ける（cfn-guard 10-iam-role が要求）
-    PermissionsBoundary: !If
-      - UsesMvmBoundary
-      - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
-      - !Ref 'AWS::NoValue'
+    # 生成される実行ロールに Permissions Boundary を付ける（cfn-guard 10-iam-role が要求）。
+    # gate は Processed テンプレートを静的検証するため、条件分岐（Fn::If）で包むと
+    # 「検証不能」として fail-closed で弾かれる。素の Fn::Sub 文字列形で直書きすること。
+    # mvm 環境以外へ流用する場合はこの行（と ScheduleV2 側の同項目）を削除する。
+    PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
     Environment:
       Variables:
         MAIN_TABLE: !Ref MainTable
@@ -409,10 +397,8 @@ Resources:
             # ここには波及しない（AWS SAM 公式 sam-property-function-schedulev2 の
             # Note: PermissionsBoundary は scheduler schedule's target IAM role に適用）。
             # cfn-guard 10-iam-role は全 IAM ロールに boundary を要求するため明示する。
-            PermissionsBoundary: !If
-              - UsesMvmBoundary
-              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
-              - !Ref 'AWS::NoValue'
+            # Globals 側と同じく Fn::If で包まず Fn::Sub 文字列形で直書きする（gate の静的検証要件）。
+            PermissionsBoundary: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/mvm-boundary'
 
   CleanupFunctionLogGroup:
     Type: AWS::Logs::LogGroup
