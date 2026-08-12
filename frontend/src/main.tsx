@@ -6,6 +6,10 @@ import './styles/tokens.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { configureAmplify } from './features/auth/amplify';
+import { AuthProvider } from './features/auth/AuthProvider';
+
+configureAmplify();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -14,6 +18,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </StrictMode>,
 );

@@ -4,8 +4,8 @@ Description: >-
   OriOriMap — データ・API基盤（T002）+ 認証基盤（T003）+ 配信基盤（T004）。DynamoDB シングルテーブル /
   S3×2 / HTTP API + Cognito JWT Authorizer / Lambda（api・cleanup）/
   EventBridge Scheduler / 監視（Alarm・Budgets）/ Cognito User Pool（Lite）
-  + 配信基盤（T004）。CloudFront（SPA・メディア・API/embed の単一オリジン集約）。
-  Google IdP は T013、独自ドメイン・ACM は T031 で追加する。
+  + 配信基盤（T004）。CloudFront（SPA・メディア・API/embed の単一オリジン集約）+
+  Cognito Google IdP（T013）。独自ドメイン・ACM は T031 で追加する。
   正本: docs/spec/02_design.md §2・§3・§4.3・§4.5・§6
 
 # ---------------------------------------------------------------------------
@@ -53,11 +53,34 @@ Parameters:
     Type: CommaDelimitedList
     Default: http://localhost:5173/
     Description: サインアウト後のリダイレクト先（Cognito App client の LogoutURLs）。
+  GoogleClientId:
+    Type: String
+    Default: ''
+    Description: >-
+      Google OAuthクライアントID（T010・SSM `/oriorimap/<env>/google/client-id`に格納）。
+      値そのものをデプロイ時に --parameter-overrides で注入する（テンプレートには書かない。
+      AWS::Cognito::UserPoolIdentityProvider の client_secret は SSM の secure な
+      動的参照に非対応なため、SSM解決はテンプレートの外で行う――実機のCreateChangeSetで
+      非対応であることを確認済み。SSM Parameter型もSecureStringは扱えず、
+      Lambdaカスタムリソースでの代替はmvm-gateが Custom::* を一律禁止するため不可）。
+      空の場合はGoogle IdPを作成しない。
+  GoogleClientSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: >-
+      Google OAuthクライアントシークレット（T010・SSM `/oriorimap/<env>/google/client-secret`・
+      SecureStringに格納）。値そのものをデプロイ時に --parameter-overrides で注入する
+      （テンプレートには書かない。GoogleClientId の説明を参照）。空の場合はGoogle IdPを
+      作成しない。
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
   ShouldCreateBudget: !And
     - !Condition HasAlertEmail
     - !Equals [!Ref CreateBudget, 'true']
+  HasGoogleCredentials: !And
+    - !Not [!Equals [!Ref GoogleClientId, '']]
+    - !Not [!Equals [!Ref GoogleClientSecret, '']]
 
 Globals:
   Function:
@@ -254,8 +277,39 @@ Resources:
       Description: OriOriMap 管理者（通報対応・非公開化/削除の権限）
       Precedence: 0
 
+  # Google IdP（T013・design §4.3）。client_id/client_secretは平文パラメータとして
+  # デプロイ時に --parameter-overrides で注入する（GoogleClientId/GoogleClientSecretの
+  # 説明を参照。SSM動的参照・SSM Parameter型・Lambdaカスタムリソースがいずれも
+  # 使えないため、テンプレート外でSSMから読んで注入する設計にした）。
+  # T010のSSMパラメータが用意できない環境（使い捨て検証スタック等）では
+  # HasGoogleCredentials が偽になりこのリソース自体を作らない。
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogleCredentials
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: 'openid email profile'
+      AttributeMapping:
+        email: email
+        name: name
+
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    Metadata:
+      # GoogleIdentityProvider（存在する場合）より後に作成・更新されるよう
+      # 暗黙の依存を強制する。DependsOnは条件付きリソースを直接指定できず
+      # （HasGoogleCredentials=falseで未作成の場合にCFnが拒否する）、この
+      # リソース型はGetAttで公開する属性を持たないため使えない。Refの戻り値
+      # （複合識別子）自体は使わず、依存関係の解析だけが目的
+      GoogleIdentityProviderDependency: !If
+        - HasGoogleCredentials
+        - !Ref GoogleIdentityProvider
+        - !Ref AWS::NoValue
     Properties:
       ClientName: !Sub '${AWS::StackName}-spa'
       UserPoolId: !Ref UserPool
@@ -269,11 +323,15 @@ Resources:
         # （ブラウザからは利用できない）。平文パスワードを送る
         # ALLOW_USER_PASSWORD_AUTH は有効化しない
         - ALLOW_ADMIN_USER_PASSWORD_AUTH
-      # Google フェデレーション用（Google IdP 自体の追加は T013）
+      # Google フェデレーション用（T013）
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
-      SupportedIdentityProviders: [COGNITO]
+      # 依存順序はMetadata（上記）で確保しているため、ここは単純にリテラルでよい
+      SupportedIdentityProviders: !If
+        - HasGoogleCredentials
+        - [COGNITO, Google]
+        - [COGNITO]
       CallbackURLs: !Ref AppCallbackUrls
       LogoutURLs: !Ref AppLogoutUrls
       # ユーザーの存在有無を推測させない（列挙攻撃対策）
@@ -335,10 +393,18 @@ Resources:
         Minify: false
         Sourcemap: false
         EntryPoints: [src/handlers/api.ts]
+        # AWS SDK v3（@smithy/node-http-handler等）はCJS前提でnode:https等を
+        # requireするが、ESM出力にはrequireが無く"Dynamic require of ... is not
+        # supported"で落ちる（T012でDynamoDB呼び出しを追加して初めて顕在化・実機確認）。
+        # createRequireでrequireを補うのがesbuild公式の回避策
+        Banner:
+          - >-
+            js=import{createRequire}from'module';const
+            require=createRequire(import.meta.url);
     Properties:
       CodeUri: backend/
       Handler: api.handler
-      Description: OriOriMap API（Hono）。T003 時点では /api/health と /api/health-auth のみ
+      Description: OriOriMap API（Hono）。/api/health・/api/health-auth・/api/me（T012）
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref MainTable }
         - S3CrudPolicy: { BucketName: !Ref MediaBucket }
@@ -359,6 +425,14 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /api/health-auth
+            Method: GET
+        # オーナー系: プロフィール取得（design §4.2・§4.3。T012）。
+        # DefaultAuthorizer（CognitoJwtAuthorizer）がそのまま効く
+        Me:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/me
             Method: GET
 
   ApiFunctionLogGroup:
