@@ -54,6 +54,7 @@
     - **1タスク＝コードスパン厳密に1個**。検証コマンド以外をバッククォートで囲まない（スタック名や 404 などもバッククォート禁止。2個以上あると `ambiguous-multiple-code-spans` で verify=null になる）
     - 形は「Done条件: 」＋1コードスパン＋「（内容: …）」の括弧内散文。日本語ゼロの純コマンドにすれば literal 判定になるが、可読性から 1スパン＋括弧散文を推奨（mvm-poc 側の推奨も同じ）
     - 検証が複数ある場合は **1本のスクリプト（`scripts/verify/T0xx.sh`）へ集約**してコードスパンを1個に保つ
+    - **2026-08-12 実施済み**: Phase C 全タスク（T012〜T029・T038）を本書式へ改訂した。検証スクリプトは各タスクの成果物として実装時に作成する（スクリプト不在なら verify が失敗する＝作り忘れは機械的に検知される）。dev環境の確認は curl / AWS CLI で自動化できるものをスクリプトへ寄せ、ブラウザ操作を要する確認だけを括弧内散文の「人手確認」として残した（人手確認の結果はPRに記録し、レビューで承認する）
     - **verify スクリプトが dev（smb-infra）の AWS を叩く場合、冒頭で mvm-target-env による spoke ロールの assume を行う**――VM 本来の hub ロールでは smb-infra を触れない。ユニットテスト部分は assume 不要。#16 で autopilot がタスクプロンプトへ自動注入する規約と同じだが、**verify スクリプト自身にも前処理が要る**
     - この改訂は **microvm 固有の準備**である。host モードで回す場合は autopilot の recipe と PM ランブックが検証を担うため不要
   - **effect-plane（`*-eph-deployer` / `*-eph-tester` / `eph-env.yml`）は設置しない（2026-08-11 決定）**: IaC の実行経路は mvm-gate Lambda（cfn-guard）に一元化する。2系統持つと guard ルールの二重管理になるため。ただし T005 の CD 用 OIDC ロール（`DEV_DEPLOY_ROLE_ARN`）は別目的（人間が承認済み＝mainマージ済みの変更を dev へ反映する信頼された経路）であり、採否は T005 着手時に確定する
@@ -160,133 +161,133 @@
   - 対象: frontend/src/features/auth/, frontend/src/pages/(Login, Signup, Confirm), backend/src/routes/me.ts, e2e前提のテストユーザー手順
   - 内容: **`aws-amplify/auth`（headless）+ shadcn/ui で自前のログイン・登録・確認コード画面を実装**（登録→確認メール→確認コード入力→ログイン→ログアウト）。SRP認証・完全日本語・§5.2藤重トークン準拠・IME規約準拠。`@aws-amplify/ui-react` の Authenticator は使わない（design §4.3）。フロントの保護ルート（未ログインは `/login` へ誘導=R1.6）、`GET /api/me`（JWT必須）実装
   - **2026-08-11 改訂**: Hosted UI 連携から自前UI実装へ変更（design §3「認証」行・§4.3）。実装量が増える分、T013 のパスワード再設定UIも同じ基盤に乗る
-  - Done条件: dev環境で メール登録→確認→ログイン→マイページ表示→ログアウト を手動確認。`curl`（JWTなし）で `/api/me` が401、JWT付きで200
+  - Done条件: `bash scripts/verify/T012.sh`（内容: スクリプトは本タスクの成果物として作成する。auth/me系を含む npm test を実行し、dev環境へ curl で JWTなしの GET /api/me が401・テストユーザーのJWT付き（admin-initiate-auth で取得）で200 を確認する。メール登録→確認コード→ログイン→マイページ表示→ログアウト の画面フローは人手確認とし、手順と結果をPRに記録する）
   - 依存: T005, T006, T007
   - _Requirements: R1.1, R1.3, R1.5, R1.6_
 
 - [ ] T013 認証スライス②: Google IdP・パスワード再設定・ロックアウト確認
   - 対象: template.yaml（Google IdP追加）, frontend/src/features/auth/
   - 内容: Google IdPをUser Poolへ追加し、**自前ログイン画面に「Googleでログイン」ボタンを実装**（`signInWithRedirect({provider:'Google'})`。`identity_provider` 指定によりCognitoは画面を描画せず即Googleへ転送するため英語画面は出ない）。パスワード再設定フロー（R1.4・自前画面）、パスワード無しアカウントへの案内表示（R1.9）、**Cognito標準ロックアウトの挙動確認と日本語エラー表示の実装**（R1.7。Hosted UIを使わないため表示は自前。design §7）
-  - Done条件: dev環境で Googleログイン成功・再設定メール受信と再設定成功・誤パスワード連続入力で一時ロックを確認（各手順を記録）
+  - Done条件: `bash scripts/verify/T013.sh`（内容: スクリプトは本タスクの成果物として作成する。dev環境の User Pool に Google IdP が登録されアプリクライアントの対応IdPに含まれることを AWS CLI の describe 系で確認し、専用テストユーザーへの誤パスワード連続入力で一時ロック応答（PasswordAttemptsExceeded 相当）になることを確認する。Googleログイン成功・再設定メール受信と再設定成功・ロック時の日本語エラー表示は人手確認とし、各手順と結果をPRに記録する）
   - 依存: T012, T010
   - _Requirements: R1.2, R1.4, R1.7, R1.9_
 
 - [ ] T014 認証スライス③【詳細設計】: 同一メール自動リンクのスパイク検証と実装
   - 対象: backend/src/handlers/preSignup.ts, template.yaml（トリガー+IAM）
   - 内容: design §4.3 の `PreSignUp_ExternalProvider` + `ListUsers` + `AdminLinkProviderForUser` フローを実機スパイクで検証し、preSignupトリガーを実装。検証結果と決定を設計書§10・要件決定ログに追記。縮退（自動リンク断念）となる場合は要件R1.8の変更としてユーザーに確認する
-  - Done条件: dev環境で (a)検証済みメールの既存アカウントにGoogleログイン→同一アカウントとしてログイン成立 (b)未検証アカウント→リンクされず案内エラー、の両方を確認
+  - Done条件: `bash scripts/verify/T014.sh`（内容: スクリプトは本タスクの成果物として作成する。preSignup ハンドラの単体テスト（検証済みメール→AdminLinkProviderForUser 呼び出し／未検証→拒否。SDKモック）を含む npm test を実行し、dev環境の User Pool の LambdaConfig に PreSignUp トリガーが結線されていることを AWS CLI で確認する。(a)検証済みメールの既存アカウントへのGoogleログインが同一アカウントとして成立 (b)未検証アカウントはリンクされず案内エラー、の実機確認はGoogleログインを要するため人手確認とし、結果を設計書§10・要件決定ログとPRに記録する）
   - 依存: T013
   - _Requirements: R1.8, R1.11_
 
 - [ ] T015 地図CRUDスライス: 作成・設定・公開切替・マイページ
   - 対象: backend/src/routes/maps.ts, frontend/src/pages/(MyPage, MapEdit設定部), backend/tests/
   - 内容: `POST/PUT/DELETE /api/maps`・`GET /api/me/maps`・`GET /api/maps/:id`（公開のみ）を実装（公開系/オーナー系分離=design §4.2）。作成フォーム（タイトル必須・説明・タグ）、非公開初期状態、公開切替UI、マイページ一覧
-  - Done条件: `npm test -w backend`（maps系）が通り、dev環境で 作成→マイページ表示→公開切替 を手動確認。非公開地図に未ログインでアクセスすると404
+  - Done条件: `bash scripts/verify/T015.sh`（内容: スクリプトは本タスクの成果物として作成する。maps系を含む npm test -w backend を実行し、dev環境へ curl で テストユーザーのJWTによる地図作成→未ログインの GET /api/maps/:id が404→公開切替→同じGETが200 を通しで確認する。作成フォーム・マイページ一覧・公開切替UIの画面表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T012
   - _Requirements: R2.1, R2.4_
 
 - [ ] T016 スポット編集スライス: 地図クリック追加・編集・HTML Marker
   - 対象: backend/src/routes/spots.ts, frontend/src/pages/MapEdit, frontend/src/components/map/EditMarkers
   - 内容: スポットCRUD API（タイトル必須検証=R2.6）と編集画面（地図クリックで追加・HTML Markerドラッグで位置調整・タイトル/説明/外部リンクのフォーム。IME対応=design §5.5）
-  - Done条件: `npm test -w backend`（spots系）が通り、dev環境で スポット追加→ドラッグ→編集→保存 を手動確認。タイトル空で保存するとインラインエラー
+  - Done条件: `bash scripts/verify/T016.sh`（内容: スクリプトは本タスクの成果物として作成する。spots系を含む npm test -w backend を実行し、dev環境へ curl で スポット追加→位置と本文の更新→取得で反映確認、タイトル空のスポット登録が400 を確認する。地図クリックでの追加・HTML Markerドラッグ・インラインエラー表示の画面操作は人手確認とし、手順と結果をPRに記録する）
   - 依存: T015, T009
   - _Requirements: R2.2, R2.6_
 
 - [ ] T017 [P] 住所・地名検索（ジオコーディング）
   - 対象: frontend/src/features/geocode/
   - 内容: 国土地理院AddressSearch（fetch・5sタイムアウト）→ Community Geocoder フォールバック → 0件時は地図クリック案内（design §3, §7）。検索UIを編集画面に統合。桐生市周辺の実住所でのサンプリング検証（§10詳細設計タスク）を行い結果を記録
-  - Done条件: `npm test -w frontend`（geocodeのモックテスト）が通り、dev環境で 実住所3件がヒット・存在しない住所で案内表示 を確認。サンプリング結果が docs/spec/ に記録されている
+  - Done条件: `bash scripts/verify/T017.sh`（内容: スクリプトは本タスクの成果物として作成する。geocodeのモックテストを含む npm test -w frontend を実行し、桐生市周辺のサンプリング検証の記録ファイルが docs/spec/ 配下に存在することを確認する。dev環境の編集画面での実住所3件のヒット・存在しない住所での地図クリック案内表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T016
   - _Requirements: R2.2, R2.9_
 
 - [ ] T018 [P] 画像アップロード: カスタムアイコン・写真
   - 対象: backend/src/routes/uploads.ts, frontend/src/features/upload/, backend/tests/
   - 内容: `POST /api/uploads`（UploadedImage=pending・presigned PUT・icon 1MB/photo 5MB制約）→ Canvas変換（icon 128px PNG / photo 1600px JPEG）→ `POST /api/uploads/:imageId/complete`（magic bytes・サイズ検証、不一致は即削除+400）→ 添付でattached（design §4.2, §6）。アイコン選択UI（プリセット+アップロード）と写真添付
-  - Done条件: `npm test -w backend`（uploads系: 正常/偽装Content-Type/超過サイズ）が通り、dev環境で アイコン画像アップロード→スポットに反映 を確認。テキストファイルをリネームしたアップロードが拒否される
+  - Done条件: `bash scripts/verify/T018.sh`（内容: スクリプトは本タスクの成果物として作成する。uploads系（正常・偽装Content-Type・超過サイズ）を含む npm test -w backend を実行し、dev環境へ curl で presigned PUT による正常アップロード→complete 成功、およびテキストファイルをPNGと偽ったアップロードが complete で400拒否されること を確認する。アイコン選択UIとスポットへの反映表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T016
   - _Requirements: R2.3, R2.7_
 
 - [ ] T019 [P] 地図削除・スポット上限
   - 対象: backend/src/routes/maps.ts, spots.ts, frontend（削除確認ダイアログ）
   - 内容: 地図削除の連鎖（パーティションBatchWrite削除・画像の`PENDING_DELETE`記録・確認ダイアログ=design §5.5）、スポット上限1,000件の追加拒否
-  - Done条件: `npm test -w backend`（削除連鎖・上限409・**削除時に画像キーが`PENDING_DELETE`へ記録されること**）が通り、dev環境で 地図削除→マイページから消える を確認
+  - Done条件: `bash scripts/verify/T019.sh`（内容: スクリプトは本タスクの成果物として作成する。削除連鎖・上限409・削除時に画像キーが PENDING_DELETE へ記録されること、を含む npm test -w backend を実行し、dev環境へ curl で 地図削除→当該地図のGETが404→オーナーの一覧から消えること を確認する。削除確認ダイアログの画面挙動は人手確認とし、手順と結果をPRに記録する）
   - 依存: T016
   - _Requirements: R2.5, R2.8_
 
 - [ ] T020 [P] 公開閲覧ページ: GeoJSON配信・スポット表示・現在地
   - 対象: backend/src/routes/maps.ts（geojson）, frontend/src/pages/MapView
   - 内容: `GET /api/maps/:id/geojson`（公開のみ）と閲覧ページ（Symbolレイヤー表示・スポットポップアップ（タイトル/説明/写真/リンク）・fitBounds・現在地ボタン・未ログイン閲覧）
-  - Done条件: dev環境のシークレットウィンドウ（未ログイン）で公開地図が表示され、スポットクリックで詳細ポップアップ、現在地ボタンが動作。非公開地図のgeojsonは404（curl確認）
+  - Done条件: `bash scripts/verify/T020.sh`（内容: スクリプトは本タスクの成果物として作成する。geojson系を含む npm test -w backend を実行し、dev環境へ curl で 公開地図の GET /api/maps/:id/geojson が200かつFeatureCollectionを返すこと、非公開地図のgeojsonが404 を確認する。シークレットウィンドウ（未ログイン）での公開地図表示・スポットクリックの詳細ポップアップ・現在地ボタンの動作は人手確認とし、手順と結果をPRに記録する）
   - 依存: T015, T009, T039
   - _Requirements: R1.5, R2.10, R4.7, R4.8_
 
 - [ ] T021 [P] 検索・一覧・トップページ
   - 対象: backend/src/routes/maps.ts（一覧/検索）, frontend/src/pages/Top
   - 内容: `GET /api/maps`（`?q=`部分一致・`?sort=created|updated`・Lambda内フィルタ/ソート=design §3）とトップページ（検索ボックス・新着/更新順切替・0件空状態=R3.3）
-  - Done条件: `npm test -w backend`（フィルタ・ソート）が通り、dev環境で キーワード検索ヒット・0件時の専用表示・並び順切替 を確認
+  - Done条件: `bash scripts/verify/T021.sh`（内容: スクリプトは本タスクの成果物として作成する。フィルタ・ソートを含む npm test -w backend を実行し、dev環境へ curl で GET /api/maps のキーワード部分一致ヒット・該当なしキーワードの0件応答・sort=created と sort=updated の並び順の違い を確認する。トップページの検索ボックス・0件時の専用表示・並び順切替UIは人手確認とし、手順と結果をPRに記録する）
   - 依存: T015
   - _Requirements: R3.1, R3.2, R3.3_
 
 - [ ] T022 重ね合わせ表示スライス
   - 対象: frontend/src/pages/MapView（重ね合わせUI）, frontend/src/components/map/LegendCard
   - 内容: 閲覧ページに「地図をかさねる」UI（公開地図の追加選択）・かさね色パレットによる凡例とレイヤー別表示切替・所属識別・参照型最新化（毎回geojson取得）・利用不可レイヤー表示・上限10（design §5.1, R4系）
-  - Done条件: dev環境で 2枚の公開地図を重ねて凡例付き表示→片方を非公開化→再読込で利用不可表示 を確認。11枚目の追加が拒否される
+  - Done条件: `bash scripts/verify/T022.sh`（内容: スクリプトは本タスクの成果物として作成する。重ね合わせ状態管理（レイヤー追加・上限10で拒否・利用不可レイヤーの扱い・かさね色の割当）の単体テストを含む npm test -w frontend を実行する。dev環境での 2枚の公開地図を重ねた凡例付き表示→片方を非公開化→再読込で利用不可表示、および11枚目の追加拒否 は画面操作のため人手確認とし、手順と結果をPRに記録する）
   - 依存: T020, T021
   - _Requirements: R4.1, R4.2, R4.3, R4.4, R4.5, R4.6_
 
 - [ ] T023 重ね合わせ地図の保存・共有スライス
   - 対象: backend/src/routes/overlays.ts, frontend/src/pages/OverlayView, backend/tests/
   - 内容: `POST /api/overlays`・`GET /api/overlays/:id`（sources: title/ownerName/status解決=R5.5）・`GET /api/me/overlays/:id`・公開切替・固有URL閲覧（未ログイン可）・出典表示・全レイヤー利用不可時の空表示。**公開overlayを一覧/検索（`GET /api/maps`・GSI1 `PUBLIC#OVL`）とトップページの表示対象に統合**（R3.1/R3.2の「重ね合わせ地図」部分）
-  - Done条件: `npm test -w backend`（overlays系・一覧統合）が通り、dev環境で 保存→発行URLをシークレットウィンドウで開く→出典付き重ね合わせ再現 を確認。公開overlayがトップの一覧・キーワード検索・並び順切替に表示される
+  - Done条件: `bash scripts/verify/T023.sh`（内容: スクリプトは本タスクの成果物として作成する。overlays系・一覧統合を含む npm test -w backend を実行し、dev環境へ curl で overlay保存→公開→GET /api/overlays/:id が sources のタイトル・所有者名・statusを解決して返すこと、公開overlayが GET /api/maps の一覧とキーワード検索に含まれること を確認する。発行URLをシークレットウィンドウで開いた出典付き重ね合わせ再現の画面表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T022
   - _Requirements: R5.1, R5.2, R5.3, R5.4, R5.5, R3.1, R3.2_
 
 - [ ] T024 embedスライス: 許可ドメイン管理・CSP付き配信
   - 対象: backend/src/routes/embed.ts, backend/src/views/embed.ts, backend/src/lib/csp.ts, frontend/src/pages/EmbedSettings, EmbedView
   - 内容: 許可ドメインCRUD+iframeコード発行UI（非公開時は発行拒否=R6.5）、`GET /embed/:type/:id` のCSP `frame-ancestors` 動的生成HTML（閲覧専用・帰属表記・「OriOriMapで開く」リンク。design §4.4）
-  - Done条件: `npm test -w backend`（CSP生成: 登録あり/なし/非公開/サブドメイン）が通り、`curl -I <dev>/embed/map/<id>` と `curl -I <dev>/embed/overlay/<id>` のCSPヘッダーに登録ドメインのみ含まれる。検証用ページ（登録ドメイン）でmap・overlay両方のiframe表示成功、未登録ドメインのページでブラウザが描画拒否、**許可ドメイン削除後に同一ページを再読込すると拒否される**（R6.6）
+  - Done条件: `bash scripts/verify/T024.sh`（内容: スクリプトは本タスクの成果物として作成する。CSP生成（登録あり・なし・非公開・サブドメイン）を含む npm test -w backend を実行し、dev環境へ curl のヘッダー取得で embed/map/:id と embed/overlay/:id の CSP frame-ancestors に登録ドメインのみが含まれること、許可ドメイン削除後は同ヘッダーから消えること を確認する。検証用ページ（登録ドメイン）での map・overlay 両方の iframe 表示成功・未登録ドメインのページでのブラウザ描画拒否・許可ドメイン削除後に同一ページを再読込すると拒否されること（R6.6）は人手確認とし、手順と結果をPRに記録する）
   - 依存: T023
   - _Requirements: R6.1, R6.2, R6.3, R6.4, R6.5, R6.6_
 
 - [ ] T025 [P] インポート①: クライアント側パーサ群（KML/KMZ/CSV）
   - 対象: frontend/src/features/import/parsers/, frontend/tests/
   - 内容: クライアント側パース（KMZ=fflateで`doc.kml`抽出 / KML=@tmcw/togeojson / CSV=papaparse）を実装し、共通のスポット配列+スキップ情報（非ポイント図形・KMZ添付画像）+行番号付きエラーに正規化する
-  - Done条件: `npm test -w frontend`（パーサ: 正常KML/KMZ/CSV・不正ファイル・線面混在・`.kml`エントリなしKMZ）が通る
+  - Done条件: `npm test -w frontend`（内容: パーサの単体テスト——正常KML/KMZ/CSV・不正ファイル・線面混在・doc.kml エントリなしKMZ——を含めて通ること）
   - 依存: T016
   - _Requirements: R7.1, R7.2, R7.3, R7.4_
 
 - [ ] T038 [P] インポート②: 一括登録APIと取り込みUI
   - 対象: backend/src/routes/spots.ts（bulk）, backend/tests/, frontend/src/pages/MapEdit（インポートUI）
   - 内容: `POST /api/maps/:id/spots/bulk`（Zod全件検証・上限チェック・応答 `{totalCount, importedCount, skippedCount, skippedReasons[]}`）と編集画面の取り込みUI（結果件数表示・行番号付きエラー表示）
-  - Done条件: `npm test -w backend`（bulk: 正常・不正行400・上限超過）が通り、dev環境で Googleマイマップから書き出したKMZの取り込み→件数報告 を確認。不正CSVは行番号付きエラーで0件登録
+  - Done条件: `bash scripts/verify/T038.sh`（内容: スクリプトは本タスクの成果物として作成する。bulk系（正常・不正行400・上限超過）を含む npm test -w backend を実行し、dev環境へ curl で 一括登録APIへの正常投入→totalCount と importedCount 等の件数応答、不正行を含む投入では行番号付きエラーかつ0件登録 を確認する。Googleマイマップから書き出した実KMZの取り込みUI→件数報告表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T025, T019
   - _Requirements: R7.1, R7.2, R7.3, R7.4, R7.5_
 
 - [ ] T026 [P] 通報スライス
   - 対象: backend/src/routes/reports.ts, backend/src/lib/rateLimit.ts, frontend（通報ダイアログ）
   - 内容: `POST /api/reports`（対象: 地図/スポット/重ね合わせ地図・理由・IPハッシュのレート制限10件/時=DynamoDBカウンタ+TTL）と閲覧画面（地図・重ね合わせ地図）の通報UI
-  - Done条件: `npm test -w backend`（受付・11件目の429）が通り、dev環境で 未ログインでの地図・重ね合わせ地図それぞれの通報送信→完了トースト を確認
+  - Done条件: `bash scripts/verify/T026.sh`（内容: スクリプトは本タスクの成果物として作成する。通報受付・11件目の429を含む npm test -w backend を実行し、dev環境へ curl で 未ログインの通報POSTが受理されること、同一IP相当の連投で11件目が429になること を確認する。地図・重ね合わせ地図それぞれの通報ダイアログ→完了トーストの画面表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T020, T023
   - _Requirements: R8.1, R8.3_
 
 - [ ] T027 管理者スライス: 通報対応
   - 対象: backend/src/routes/admin.ts, backend/src/lib/auth.ts（adminグループ検証）, frontend/src/pages/Admin
   - 内容: `GET /api/admin/reports`・`POST /api/admin/actions`（地図/重ね合わせ=非公開化or削除、スポット=個別削除。即時に検索/一覧/重ね合わせ/embedから除外）と管理者画面。管理者シード手順（Cognitoグループ付与runbook）の文書化
-  - Done条件: `npm test -w backend`（admin認可: 一般ユーザー403）が通り、dev環境で (a)通報→管理者で地図を非公開化→一覧から消え重ね合わせに利用不可表示・**embedビューでも非表示** (b)**スポット個別削除→当該スポットのみ消える** を確認
+  - Done条件: `bash scripts/verify/T027.sh`（内容: スクリプトは本タスクの成果物として作成する。admin認可（一般ユーザー403）を含む npm test -w backend を実行し、dev環境へ curl で 一般ユーザーJWTの admin API が403・adminグループ付与ユーザーで200、非公開化アクション後に対象地図が公開一覧から消えること、スポット個別削除後に geojson から当該スポットのみ消えること を確認する。管理者画面の操作・重ね合わせでの利用不可表示・embedビューでの非表示は人手確認とし、手順と結果をPRに記録する）
   - 依存: T026, T024
   - _Requirements: R8.1, R8.2_
 
 - [ ] T028 [P] 退会・アカウント設定スライス
   - 対象: backend/src/routes/me.ts, frontend/src/pages/Settings
   - 内容: 表示名変更と `DELETE /api/me`（tombstone: status=pending_delete・所有コンテンツ即時非公開化・AdminDisableUser・202応答=design §4.2）。確認は「退会する」の文言入力（design §5.5）
-  - Done条件: `npm test -w backend`（me系）が通り、dev環境で 退会→即ログイン不可→公開していた地図が一覧から消える を確認
+  - Done条件: `bash scripts/verify/T028.sh`（内容: スクリプトは本タスクの成果物として作成する。me系を含む npm test -w backend を実行し、dev環境で使い捨てのテストユーザーを作成→公開地図を作成→curl で DELETE /api/me が202→同ユーザーの再認証が失敗すること（AdminDisableUser 反映）→公開していた地図が一覧から消えること を確認する。設定画面での文言入力による退会確認UIは人手確認とし、手順と結果をPRに記録する）
   - 依存: T012
   - _Requirements: R1.10_
 
 - [ ] T029 cleanupバッチスライス（3系統）
   - 対象: backend/src/handlers/cleanup.ts, backend/tests/
   - 内容: design §4.5 の3系統（PENDING_DELETE 7日回収 / 未添付画像回収 / 退会の段階削除→最後にAdminDeleteUser+USERレコード削除）を冪等に実装し、Schedulerと結合
-  - Done条件: `npm test -w backend`（3系統+途中失敗からの再実行）が通り、dev環境で手動invoke（`aws lambda invoke`）し退会済みユーザーのコンテンツが削除される
+  - Done条件: `bash scripts/verify/T029.sh`（内容: スクリプトは本タスクの成果物として作成する。3系統と途中失敗からの再実行を含む npm test -w backend を実行し、dev環境で AWS CLI の lambda invoke により cleanup を手動起動→退会済みテストユーザーのコンテンツが削除されること→続けて再実行してもエラーにならないこと（冪等性）を確認する）
   - 依存: T018, T019, T028
   - _Requirements: R2.11, R1.10_
 
