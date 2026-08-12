@@ -467,6 +467,13 @@ Resources:
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
+      # ★必須タグ（2026-08-12・GX22 契約）: microvm ワーカー実行ロールの
+      # cloudfront:CreateInvalidation 等は ABAC（aws:ResourceTag/Project=oriorimap）
+      # で絞られている。このタグが無いと SPA sync 後のキャッシュ無効化が
+      # AccessDenied になる（UserPool の Project タグと同じ契約）。
+      Tags:
+        - Key: Project
+          Value: oriorimap
       DistributionConfig:
         Enabled: true
         Comment: !Sub 'OriOriMap (${AWS::StackName})'
