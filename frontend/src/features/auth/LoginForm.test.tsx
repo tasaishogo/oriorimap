@@ -69,6 +69,25 @@ describe('LoginForm', () => {
     ).toBeInTheDocument();
   });
 
+  it('ロックアウト時はロックアウト専用のメッセージを表示する（R1.7・design §7）', async () => {
+    signIn.mockRejectedValue({
+      name: 'NotAuthorizedException',
+      message: 'Password attempts exceeded',
+    });
+    renderForm();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('メールアドレス'), 'hanako@example.com');
+    await user.type(screen.getByLabelText('パスワード'), 'wrong-pass');
+    await user.click(screen.getByRole('button', { name: 'ログインする' }));
+
+    expect(
+      await screen.findByText(
+        'ログイン試行回数が上限に達しました。しばらくしてから再度お試しください。',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('未入力での送信は拒否され、signInは呼ばれない（A6）', async () => {
     renderForm();
     const user = userEvent.setup();

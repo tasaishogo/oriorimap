@@ -1,5 +1,4 @@
 // Cognito/Amplifyの例外名を日本語の案内文へ翻訳する。
-// R1.7（ロックアウト時の文言）はT013の担当範囲のため、ここでは汎用文言のみを扱う。
 const MESSAGES: Record<string, string> = {
   UsernameExistsException: 'このメールアドレスは既に登録されています。ログインをお試しください。',
   InvalidPasswordException: 'パスワードは8文字以上で、英小文字と数字を含めてください。',
@@ -16,8 +15,28 @@ const MESSAGES: Record<string, string> = {
   AliasExistsException: 'このメールアドレスは既に登録されています。ログインをお試しください。',
 };
 
+function errorName(err: unknown): string | undefined {
+  return err && typeof err === 'object' && 'name' in err ? String(err.name) : undefined;
+}
+
+function errorMessage(err: unknown): string {
+  return err && typeof err === 'object' && 'message' in err ? String(err.message) : '';
+}
+
+// Cognito標準ロックアウト（design §7・R1.7）はNotAuthorizedExceptionのまま
+// message差分でしか区別できない（"Password attempts exceeded"）。
+// Hosted UIを使わないため表示は自前実装で分岐する。
+export function isLockoutError(err: unknown): boolean {
+  return (
+    errorName(err) === 'NotAuthorizedException' && /attempts exceeded/i.test(errorMessage(err))
+  );
+}
+
 export function translateAuthError(err: unknown): string {
-  const name = err && typeof err === 'object' && 'name' in err ? String(err.name) : undefined;
+  if (isLockoutError(err)) {
+    return 'ログイン試行回数が上限に達しました。しばらくしてから再度お試しください。';
+  }
+  const name = errorName(err);
   if (name && name in MESSAGES) {
     return MESSAGES[name];
   }

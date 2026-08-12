@@ -10,6 +10,7 @@ import MapEdit from './pages/MapEdit';
 import MapView from './pages/MapView';
 import MyPage from './pages/MyPage';
 import OverlayView from './pages/OverlayView';
+import ResetPassword from './pages/ResetPassword';
 import Settings from './pages/Settings';
 import Signup from './pages/Signup';
 import Top from './pages/Top';
@@ -79,6 +80,14 @@ export default function AppRoutes() {
         element={
           <AppLayout>
             <Confirm />
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          <AppLayout>
+            <ResetPassword />
           </AppLayout>
         }
       />

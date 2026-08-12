@@ -88,6 +88,12 @@ describe('AppRoutes', () => {
     expect(screen.getByTestId('page-heading')).toHaveTextContent('embed設定');
   });
 
+  it('renders the reset password page at /reset-password', () => {
+    renderAt('/reset-password');
+    expect(screen.getByRole('banner')).toBeInTheDocument();
+    expect(screen.getByTestId('page-heading')).toHaveTextContent('パスワードの再設定');
+  });
+
   it('redirects an unauthenticated visitor from /mypage to /login (R1.6)', () => {
     renderAt('/mypage');
     expect(screen.getByRole('banner')).toBeInTheDocument();
