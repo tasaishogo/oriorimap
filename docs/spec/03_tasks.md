@@ -12,8 +12,8 @@
 
 ## 進捗ステータス（2026-08-12 更新・git/PR履歴と突合し本ファイルの[x]状態を補正）
 
-- **完了 12件**: T001, T002, T003, T004, T006, T007, T008, T009, T010, T011, T033, T039（各タスクの完了記録・PR番号は該当項目を参照）
-- **未着手 27件**: 上記以外。うち T005 は T005-b まで完了・T005-a のみ残（Phase B最後の未完了）
+- **完了 14件**: T001, T002, T003, T004, T006, T007, T008, T009, T010, T011, T012, T013, T033, T039（各タスクの完了記録・PR番号は該当項目を参照。T012/T013 は PR#20＝2026-08-16 に本ファイルへ反映）
+- **未着手 25件**: 上記以外。うち T005 は T005-b まで完了・T005-a のみ残（Phase B最後の未完了）。T014 はブランチ `task/T014-presignup-link` が origin に無く、T015 は VM 内 commit `9bd448b` 未 push（生存未確認）＝いずれも未完扱い（`.agent-tasks/wave3-review-notes.md`）
   - T005-a（CIへのbuildジョブ追加・`deploy-dev.yml`削除）: 未着手（現状 `.github/workflows/` は `deploy-dev.yml` と `pipeline-gates.yml` のみで、後者に `build` ジョブは無い）
   - T005-b（devスタック初回構築）: **完了（2026-08-12）**。`oriorimap-dev` を CFnサービスロール `mvm-proj-oriorimap-cfn` 付き（スティッキー参照を確認済み）で gate 経由により構築し、`curl https://d1xg2jeym7k92s.cloudfront.net/api/health` が200・JWT必須ルート（/api/health-auth）は401を確認。**dev CloudFrontドメインは `d1xg2jeym7k92s.cloudfront.net`（T039 のGeoloniaキー登録はこの値）**。初回構築で踏んだ落とし穴2件（PermissionsBoundaryのFn::If包みがguardで検証不能 / ScheduleV2の自動命名がスタック名始まりにならず権限スコープ外）の詳細と対処はPR#15と運用注記★T005-bを参照。SPAルート（/）はフロント資産未syncのため403（想定どおり・health-onlyが本タスクの範囲）
 - **見栄えの確認可否**: dev環境（CloudFront経由URL）は未構築のためdev URLでの確認は不可。ローカルで `npm run dev -w frontend` を起動すればT007（テーマ・共通レイアウト）とT009（Geolonia地図・サンプル3スポット表示）は確認可能（Geolonia APIキーは`frontend/.env.local`に設定済み、`localhost`はキーのURL制限対象外）。Phase C（T012〜）が未着手のため、ログイン・地図CRUD等の実機能画面はまだプレースホルダ（`frontend/src/pages/*.tsx` は見出しのみの10〜12行）
@@ -110,7 +110,7 @@
     - **T005-a（先行・いつでも可）**: ci.yml 作成 + deploy-dev.yml 削除
     - **T005-b（microvm 再 vend の後）**: dev スタックの初回構築。**必ず `--role-arn mvm-proj-oriorimap-cfn` を指定して作る**――CFn スタックはサービスロールをスティッキー参照するため、管理者権限で先に作ると後から VM が更新する際に役割が切り替わり、権限ギャップが本番同然の場所で初めて露見する（microvm-mode の落とし穴に実事故として記録あり）
   - Done条件: (1) PR に対して `pipeline-gates.yml` の `build` ジョブが `sam validate` / `sam build` / フロントビルドを実行して緑になる (2) dev スタックが `mvm-proj-oriorimap-cfn` をサービスロールとして構築され、`curl <dev CloudFrontドメイン>/api/health` が200（health-only。機能スライスへの依存は持たない） (3) `deploy-dev.yml` が削除され、リポジトリに AWS 認証情報を必要とするワークフローが存在しない
-  - 依存: T004（+ T005-b は microvm 再 vend の完了）
+  - 依存: T004（後半 (b) の dev スタック初回構築は 2026-08-12 に完了済み。※この依存行では「本タスク ID＋ハイフン＋英字」の表記を避けている——parse-tasks が自己依存として読み波構造が壊れるため。claude-skills #69）
   - **注記（ガード対象パス）**: `.github/workflows/` は project-autopilot 保護パス。**当該部分は人間著作差分**（人間がメインチェックアウトで著作→オーケストレータがblob検証つきverbatim移送・human-authored明記コミット）として扱うこと
   - **注記（esbuild）**: ci.yml で `sam validate` 以上（`sam build`）を行う場合は `npm ci` の後に **`npm run sam:build`** で呼ぶこと。素の `sam build` は npm workspaces の巻き上げにより `Cannot find esbuild` で失敗する（AGENTS.md P2-Node 規約）
   - _Requirements: 全要件共通（デプロイ経路）_
@@ -166,7 +166,7 @@
 
 ## Phase C: 機能スライス
 
-- [ ] T012 認証スライス①: 自前ログインUI・保護ルート・プロフィール
+- [x] T012 認証スライス①: 自前ログインUI・保護ルート・プロフィール（2026-08-12 完了・PR#20 `feat(auth): 認証スライス①②（自前ログインUI・Google IdP・パスワード再設定）`・`scripts/verify/T012.sh` 同梱）
   - 対象: frontend/src/features/auth/, frontend/src/pages/(Login, Signup, Confirm), backend/src/routes/me.ts, e2e前提のテストユーザー手順
   - 内容: **`aws-amplify/auth`（headless）+ shadcn/ui で自前のログイン・登録・確認コード画面を実装**（登録→確認メール→確認コード入力→ログイン→ログアウト）。SRP認証・完全日本語・§5.2藤重トークン準拠・IME規約準拠。`@aws-amplify/ui-react` の Authenticator は使わない（design §4.3）。フロントの保護ルート（未ログインは `/login` へ誘導=R1.6）、`GET /api/me`（JWT必須）実装
   - **2026-08-11 改訂**: Hosted UI 連携から自前UI実装へ変更（design §3「認証」行・§4.3）。実装量が増える分、T013 のパスワード再設定UIも同じ基盤に乗る
@@ -174,7 +174,7 @@
   - 依存: T005, T006, T007
   - _Requirements: R1.1, R1.3, R1.5, R1.6_
 
-- [ ] T013 認証スライス②: Google IdP・パスワード再設定・ロックアウト確認
+- [x] T013 認証スライス②: Google IdP・パスワード再設定・ロックアウト確認（2026-08-12 完了・PR#20 に同梱・`scripts/verify/T013.sh` 同梱）
   - 対象: template.yaml（Google IdP追加）, frontend/src/features/auth/
   - 内容: Google IdPをUser Poolへ追加し、**自前ログイン画面に「Googleでログイン」ボタンを実装**（`signInWithRedirect({provider:'Google'})`。`identity_provider` 指定によりCognitoは画面を描画せず即Googleへ転送するため英語画面は出ない）。パスワード再設定フロー（R1.4・自前画面）、パスワード無しアカウントへの案内表示（R1.9）、**Cognito標準ロックアウトの挙動確認と日本語エラー表示の実装**（R1.7。Hosted UIを使わないため表示は自前。design §7）
   - Done条件: `bash scripts/verify/T013.sh`（内容: スクリプトは本タスクの成果物として作成する。dev環境の User Pool に Google IdP が登録されアプリクライアントの対応IdPに含まれることを AWS CLI の describe 系で確認し、専用テストユーザーへの誤パスワード連続入力で一時ロック応答（PasswordAttemptsExceeded 相当）になることを確認する。Googleログイン成功・再設定メール受信と再設定成功・ロック時の日本語エラー表示は人手確認とし、各手順と結果をPRに記録する）
